@@ -6,5 +6,10 @@ def create_custom_menu():
 
     MFS_menu = cmds.menu("MFS_menu", label="Maya Fluid Simulator", parent="MayaWindow", tearOff=False)
 
+    # TODO: HAVE A 'CREATE' LABEL ABOVE THE OPTIONS
+    # TODO: ICONS
+    # TODO: CHANGE COMMANDS
+    # TODO: REFACTOR TO FIT CODING CONVENTIONS
+
     cmds.menuItem(label="Domain", command="print('domain applied')")
     cmds.menuItem(label="Solver", command="print('solver applied')")
