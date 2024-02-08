@@ -1,32 +1,30 @@
 from maya import cmds
 from maya.api import OpenMaya as om
+from MFS_menu import MFS_create_menu, MFS_delete_menu
+from MFS_solverNode import MFS_SolverNode
 
 maya_useNewAPI = True
 
-from MFS_menu import create_custom_menu
-
-create_custom_menu()
-
-
-from MFS_sourceNode import MFS_SourceNode
-from MFS_solverNode import MFS_SolverNode
-
-nodes = [MFS_SourceNode, MFS_SolverNode]
+nodes = [MFS_SolverNode]
 
 def initializePlugin(plugin):
-    pluginFn = om.MFnPlugin(plugin, "Christopher Hosken", "0.0.1")
+    mPlugin = om.MFnPlugin(plugin)
+    try:
+        for node in nodes:
+            mPlugin.registerNode(node.kPluginNodeName, node.kPluginNodeId, node.creator, node.initialize, om.MPxNode.kDependNode, node.kPluginNodeClassify)
+    except:
+        raise RuntimeError("Failed to register {0}".format(node.kPluginNodeName))
 
-    for node in nodes:
-        try:
-            pluginFn.registerNode(node.typeName, node.typeId, node.creator, node.initialize, om.MPxNode.kDependNode)
-        except:
-            raise RuntimeError("Failed to register node {0}".format(node.typeName))
+    MFS_create_menu()
 
 def uninitializePlugin(plugin):
-    pluginFn = om.MFnPlugin(plugin)
+    MFS_delete_menu()
+    
+    mPlugin = om.MFnPlugin(plugin)
+    try:
+        for node in nodes:
+            mPlugin.deregisterNode(node.kPluginNodeId)
+    except:
+        raise RuntimeError("Failed to deregister {0}".format(node.kPluginNodeName))
 
-    for node in reversed(nodes):
-        try:
-            pluginFn.unregisterNode(node.typeId)
-        except:
-            raise RuntimeError("Failed to unregister node {0}".format(node.typeName))
+    
