@@ -1,6 +1,7 @@
 import os
 import maya.cmds as cmds
 from maya.api import OpenMaya as om
+from MFS_fluids import MFS_Solver
 
 attributes = [
     ("domainSize", "float3"),
@@ -11,6 +12,8 @@ attributes = [
     ("isInflow", "bool"), 
     ("velocity", "float3")
 ]
+
+solver = MFS_Solver()
 
 class MFS_SolverNode(om.MPxNode):
     kPluginNodeName="MFS_SolverNode"
@@ -73,6 +76,7 @@ def MFS_assign_SolverNode(*args):
         return
 
     active_object = selected_objects[0]
+    solver.source_object = active_object
 
     if cmds.objectType(active_object) != "transform":
         cmds.confirmDialog(title="Solver Error!", 
@@ -100,6 +104,7 @@ def MFS_assign_SolverNode(*args):
             cmds.addAttr(active_object, longName=attr[0], attributeType=attr[1])
             cmds.setAttr(target_path, cmds.getAttr(attr_path))
 
+
         cmds.connectAttr(attr_path, target_path, force=True)
 
     wireframe = cmds.polyCube(width=1, height=1, depth=1, name="MFS_Domain")[0]
@@ -113,3 +118,16 @@ def MFS_assign_SolverNode(*args):
     cmds.connectAttr("{}.domainSize0".format(node), "{}.scaleX".format(wireframe))
     cmds.connectAttr("{}.domainSize1".format(node), "{}.scaleY".format(wireframe))
     cmds.connectAttr("{}.domainSize2".format(node), "{}.scaleZ".format(wireframe))
+
+    cmds.scriptJob(attributeChange=[f"{active_object}.particleScale", point_distribute_callback])
+
+    cmds.scriptJob(e=['timeChanged', frame_update_function])
+    
+    point_distribute_callback()
+
+def point_distribute_callback():
+    solver.point_distribute()
+
+def frame_update_function():
+    solver.update()
+    print("Frame Updated:", cmds.currentTime(query=True))

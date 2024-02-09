@@ -26,5 +26,3 @@ def uninitializePlugin(plugin):
             mPlugin.deregisterNode(node.kPluginNodeId)
     except:
         raise RuntimeError("Failed to deregister {0}".format(node.kPluginNodeName))
-
-    
