@@ -3,6 +3,8 @@ import maya.cmds as cmds
 from maya.api import OpenMaya as om
 from MFS_fluids import MFS_Solver
 
+solver = MFS_Solver()
+
 attributes = [
     ("domainSize", "float3"),
     ("gravity", "float"), 
@@ -12,8 +14,6 @@ attributes = [
     ("isInflow", "bool"), 
     ("velocity", "float3")
 ]
-
-solver = MFS_Solver()
 
 class MFS_SolverNode(om.MPxNode):
     kPluginNodeName="MFS_SolverNode"
@@ -120,14 +120,24 @@ def MFS_assign_SolverNode(*args):
     cmds.connectAttr("{}.domainSize2".format(node), "{}.scaleZ".format(wireframe))
 
     cmds.scriptJob(attributeChange=[f"{active_object}.particleScale", point_distribute_callback])
-
-    cmds.scriptJob(e=['timeChanged', frame_update_function])
     
     point_distribute_callback()
 
 def point_distribute_callback():
     solver.point_distribute()
 
-def frame_update_function():
+def MFS_simulation_callback(*args):
+    cmds.currentTime(1, edit=True)
+    solver.simulating = True
+    MFS_simulate()
+
+def MFS_simulate():
+    t = int(cmds.currentTime(query=True))
+    
+    if (t < 1 or t > 30): 
+        solver.simulating = False
+        return
+    
     solver.update()
-    print("Frame Updated:", cmds.currentTime(query=True))
+    cmds.currentTime(t + 1, edit=True)
+    MFS_simulate()
