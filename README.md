@@ -9,10 +9,19 @@ https://en.wikipedia.org/wiki/Close-packing_of_equal_spheres
 Folder Structure Inspired by:
 https://github.com/thejoltjoker/ChatGPTforMaya/tree/master
 
+https://matthias-research.github.io/pages/publications/sca03.pdf
+https://github.com/Ceyron/machine-learning-and-simulation/blob/main/english/simulation_scripts/smoothed_particle_hydrodynamics_simple_python.py
+http://en.wikipedia.org/wiki/Smoothed-particle_hydrodynamics
+https://cg.informatik.uni-freiburg.de/publications/2014_EG_SPH_STAR.pdf
+
+
+INSTALLATION:
+`"C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" -m pip install --user numpy`
+
 
 TODOS:
 
-3. particles currently source in bounding box, not the object
-4. multi-sims (initialization is OK, simulating seems to take in account both source objects)
-5. navier stokes implementation
-6. speed up
+1. implement neigbor detection and calculation
+2. divergence calculation
+3. speed up
+4. particles currently source in bounding box, not the object

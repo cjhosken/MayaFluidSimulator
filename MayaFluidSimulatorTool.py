@@ -3,7 +3,7 @@ from maya.api import OpenMaya as om
 import os
 import math
 import random
-import inspect
+import numpy as np
 
 # ------ CLASSES ------
 
@@ -30,8 +30,10 @@ class MFS_Solver():
     initialized = False
     pscale = 0
 
-    def update(self, start, end, init_force, init_vel, viscosity, scale):
+    def update(self, start, end, other_force, init_vel, viscosity, scale):
         t = (int(cmds.currentTime(query=True)) - start)
+
+        mass = 0.1
 
         if (not self.solved):
             for p in self.points:        
@@ -51,33 +53,74 @@ class MFS_Solver():
                     max_point = om.MPoint(bounding_box[3], bounding_box[4], bounding_box[5])
 
 
-                    force = [
-                        init_force[0] + (random.random() - 0.5) * 2,
-                        init_force[1],
-                        init_force[2] + (random.random() - 0.5) * 2
+                    # FOR EACH PARTICLE i
+                    # find neighbors j
+
+                    # pi = summationj of mj Wij
+                    # compute pi using rho i
+
+                    # Need to find mass/pressure * divergence(density)
+
+                    density = [0, 0, 0]
+                    velocity = [0, 0, 0]
+
+                    pressure = 0.1
+
+                    pressure_force = [
+                        mass / pressure * divergence(density[0]), 
+                        mass / pressure * divergence(density[1]), 
+                        mass / pressure * divergence(density[2])
                     ]
 
+                    pressure_force = [0, 0, 0]
+
+
+                    # mass * viscosity * divergence(velocity)
+                    viscosity_force = [
+                        mass * viscosity * divergence(velocity[0]), 
+                        mass * viscosity * divergence(velocity[1]), 
+                        mass * viscosity * divergence(velocity[2]) 
+                    ]
+
+                    viscosity_force = [0, 0, 0]
+                    
+
+                    # CREATE A FORCE FACTOR
+                    force = [
+                        pressure_force[0] + viscosity_force[0] + (mass * other_force[0]),
+                        pressure_force[1] + viscosity_force[1] + (mass * other_force[1]),
+                        pressure_force[2] + viscosity_force[2] + (mass * other_force[2])
+                    ]
+
+                    # AFFECT THE VELOCITY WITH FORCE
                     p.velocity.append(
                                         [
-                                            p.velocity[t-1][0] + force[0] * scale,
-                                            p.velocity[t-1][1] + force[1] * scale,
-                                            p.velocity[t-1][2] + force[2] * scale
+                                            p.velocity[t-1][0] + (force[0] * scale)/mass,
+                                            p.velocity[t-1][1] + (force[1] * scale)/mass,
+                                            p.velocity[t-1][2] + (force[2] * scale)/mass
                                         ]
                                     )
                     
+
+
+
+
+                    # CALCULATE AN "ADVECTED" POSITION (where the particle will move to)
                     advected = [
-                        p.position[t-1][0] + p.velocity[t][0],
-                        p.position[t-1][1] + p.velocity[t][1],
-                        p.position[t-1][2] + p.velocity[t][2]
+                        p.position[t-1][0] + (p.velocity[t][0]) * scale,
+                        p.position[t-1][1] + (p.velocity[t][1]) * scale,
+                        p.position[t-1][2] + (p.velocity[t][2]) * scale
                     ]
+                
+                    # CHECK FOR PARTICLE COLLISIONS
+                    #for s in self.points:
+                    #    if (s.id != p.id):
+                    #        if (math.sqrt(math.pow(s.position[t-1][0] - p.position[t-1][0] + p.velocity[t][0], 2) + math.pow(s.position[t-1][1] - p.position[t-1][1] + p.velocity[t][1], 2) + math.pow(s.position[t-1][2] - p.position[t-1][2] + p.velocity[t][2], 2)) < self.pscale/2):
+                    #            p.velocity[t][0] = -p.velocity[t][0] * viscosity
+                    #            p.velocity[t][1] = -p.velocity[t][1] * viscosity
+                    #            p.velocity[t][2] = -p.velocity[t][2] * viscosity
 
-                    for s in self.points:
-                        if (s.id != p.id):
-                            if (math.sqrt(math.pow(s.position[t-1][0] - p.position[t-1][0] + p.velocity[t][0], 2) + math.pow(s.position[t-1][1] - p.position[t-1][1] + p.velocity[t][1], 2) + math.pow(s.position[t-1][2] - p.position[t-1][2] + p.velocity[t][2], 2)) < self.pscale/2):
-                                p.velocity[t][0] = -p.velocity[t][0] * viscosity
-                                p.velocity[t][1] = -p.velocity[t][1] * viscosity
-                                p.velocity[t][2] = -p.velocity[t][2] * viscosity
-
+                    # CHECK BOUNDARIES
                     if (advected[0] < min_point[0] or advected[0] > max_point[0]):
                         p.velocity[t][0] = -p.velocity[t][0] * viscosity
 
@@ -87,12 +130,13 @@ class MFS_Solver():
                     if (advected[2] < min_point[2] or advected[2] > max_point[2]):
                         p.velocity[t][2] = -p.velocity[t][2] * viscosity
 
-                                        # USER NAVIER STOKES HERE TO ADJUST THE PARTICLES
+
+                    # UPDATE POSITION
                     p.position.append(
                                         [
-                                            p.position[t-1][0] + p.velocity[t][0], 
-                                            p.position[t-1][1] + p.velocity[t][1], 
-                                            p.position[t-1][2] + p.velocity[t][2]
+                                            p.position[t-1][0] + (p.velocity[t][0]) * scale, 
+                                            p.position[t-1][1] + (p.velocity[t][1]) * scale, 
+                                            p.position[t-1][2] + (p.velocity[t][2]) * scale
                                         ]
                                     )
 
@@ -159,6 +203,7 @@ class MFS_Solver():
                     pnt.position[0] = [ix, iy, iz]
                     pnt.velocity[0] = [0, 0, 0]
                     pnt.id = i
+
                     self.points.append(pnt)
 
                     i += 1
@@ -233,7 +278,7 @@ def MFS_popup(*args):
     
     cmds.rowLayout(numberOfColumns=3)
     timeCtrl = cmds.intFieldGrp(numberOfFields=2, value1=1, value2=120, label="Frame Range")
-    tsCtrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.01, field=True, label="Time Scale")
+    tsCtrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.05, field=True, label="Time Scale")
 
     cmds.columnLayout(adjustableColumn=True, parent=col)
 
@@ -406,6 +451,10 @@ def MFS_clearSolver(timeCtrl):
     for solver in solvers:
         if solver.source_object == active_object:
             solver.clearSim(frameRange[0], frameRange[1])
+
+
+def divergence(value):
+    return 1
 
 if __name__ == "__main__":
     MFS_create_menu()
