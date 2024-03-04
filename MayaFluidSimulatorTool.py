@@ -3,6 +3,7 @@ from maya.api import OpenMaya as om
 import os
 import math
 import random
+import inspect
 
 # ------ CLASSES ------
 
@@ -201,12 +202,15 @@ def MFS_create_menu():
 
     cmds.menu("MFS_menu", label="Maya Fluid Simulator", parent="MayaWindow", tearOff=False)
 
-    cmds.menuItem(label="Open Maya Fluid Simulator", command=MFS_popup)
+    cmds.menuItem(label="Open Maya Fluid Simulator", command=MFS_popup, image="D:/MFS_icon_solver_512.png")
 
 def MFS_popup(*args):
 
     cmds.window(title="Maya Fluid Simulator", widthHeight=(500, 500))
     col = cmds.columnLayout(adjustableColumn=True)
+
+    image_path = "D:/MFS_banner.png"
+    image = cmds.image(width=300, height=150, image=image_path)
     
     pscaleCtrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=0.25, field=True, label="Particle Scale")
     domainCtrl = cmds.checkBox(label="Keep Domain", value=True)
