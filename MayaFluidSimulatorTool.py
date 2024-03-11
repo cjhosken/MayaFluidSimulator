@@ -7,16 +7,14 @@ import sys
 
 # ------ CLASSES ------
 
-
 class MFS_Particle():
     def __init__(self):
         self.id = -1
         self.position = [[0, 0, 0]]
         self.velocity = [[0, 0, 0]]
-
-        self.pressure = [0, 0, 0]
-        self.density = 1
-        self.viscosity = [0, 0, 0]
+        self.mass = 1
+        self.density = 1000
+        self.pressure = 0
 
     def speed(self, t):
         return math.sqrt(math.pow(self.velocity[t][0],2) + math.pow(self.velocity[t][1],2) + math.pow(self.velocity[t][2],2))
@@ -37,8 +35,6 @@ class MFS_Solver():
     def update(self, start, end, other_force, init_vel, viscosity_factor, scale):
         t = (int(cmds.currentTime(query=True)) - start)
 
-        mass = 1
-
         if (not self.solved):
             for p in self.points:        
                 if (t==0):
@@ -56,107 +52,101 @@ class MFS_Solver():
                     min_point = om.MPoint(bounding_box[0], bounding_box[1], bounding_box[2])
                     max_point = om.MPoint(bounding_box[3], bounding_box[4], bounding_box[5])
 
+                    # taken from https://nccastaff.bournemouth.ac.uk/jmacey/MastersProject/MSc16/15/thesis.pdf
+                    max_neighbors = 3
+                    total_particles = len(self.points)
 
-                    kerneldist = self.pscale * 2
+                    # kerneldist is the radius size of the neighbors search
+                    kerneldist = self.pscale * max_neighbors
 
-                    # taken from https://github.com/AlexandreSajus/Python-Fluid-Simulation
-                    density = 0
-                    density_near = 0
-                    pressure = [0, 0, 0]
+                    # kfac is the gas stiffness constant
+                    kfac = 0.01
+                    h = math.pow((3 * self.volume * max_neighbors) / (4*math.pi * total_particles), 1/3)
+
+                    p.pressure = kfac * p.density
+
+                    pressure_force = [0, 0, 0]
                     viscosity_force = [0, 0, 0]
 
                     for n in self.points:
                         if (n.id != p.id):
-                            neighbor_vector = [
+                            p_to_n = [
                                 n.position[t-1][0] - p.position[t-1][0],
                                 n.position[t-1][1] - p.position[t-1][1],
                                 n.position[t-1][2] - p.position[t-1][2]
                             ]
 
-                            distance = math.sqrt(neighbor_vector[0]**2 + neighbor_vector[1]**2 + neighbor_vector[2]**2)
 
-                            normal_p_to_n = [
-                                neighbor_vector[0] / distance,
-                                neighbor_vector[1] / distance,
-                                neighbor_vector[2] / distance
-                            ]
-
-                            relative_distance = distance / kerneldist
-                            velocity_difference = (p.velocity[t-1][0] - n.velocity[t-1][0]) * normal_p_to_n[0] + (p.velocity[t-1][1] - n.velocity[t-1][1]) * normal_p_to_n[1] + (p.velocity[t-1][2] - n.velocity[t-1][2]) * normal_p_to_n[2]
+                            distance = math.sqrt(p_to_n[0]**2 + p_to_n[1]**2 + p_to_n[2]**2)
 
                             if (distance < kerneldist):
-                                # CALCULATE DENSITY
-
-                                normal_distance = 1 - distance / kerneldist
-
-                                density +=normal_distance**2
-
-                                n.density += normal_distance**2
-
                                 # CALCULATE PRESSURE
+                                term_a = ((p.pressure + n.pressure) / 2) * (n.mass / n.density)
+                                smoothing = [
+                                    (45 / (math.pi * h**6)) * (p_to_n[0]/distance) * (h - distance)**2,
+                                    (45 / (math.pi * h**6)) * (p_to_n[1]/distance) * (h - distance)**2,
+                                    (45 / (math.pi * h**6)) * (p_to_n[2]/distance) * (h - distance)**2
 
-                                total_pressure = p.pressure[0] + n.pressure[0] * normal_distance**2
-
-                                pressure_vector = [
-                                    neighbor_vector[0] * total_pressure/distance,
-                                    neighbor_vector[1] * total_pressure/distance,
-                                    neighbor_vector[2] * total_pressure/distance,
                                 ]
 
-                                n.pressure[0] += pressure_vector[0]
-                                n.pressure[1] += pressure_vector[0]
-                                n.pressure[2] += pressure_vector[0]
+                                pressure_force[0] -= term_a*smoothing[0]
+                                pressure_force[1] -= term_a*smoothing[1]
+                                pressure_force[2] -= term_a*smoothing[2]
 
-                                # Make sure that pressure is subtracted from the final force, it should be the inverse of whatever you do to the neighbor pressure
-                                pressure[0] += pressure_vector[0]
-                                pressure[1] += pressure_vector[1]
-                                pressure[2] += pressure_vector[2]
 
-                            if (velocity_difference > 0):
                                 # CALCULATE VISCOSITY
 
-                                viscosity_force = [
-                                    (1-relative_distance) * viscosity_factor * velocity_difference * normal_p_to_n[0],
-                                    (1-relative_distance) * viscosity_factor * velocity_difference * normal_p_to_n[1],
-                                    (1-relative_distance) * viscosity_factor * velocity_difference * normal_p_to_n[2]
+                                velocity_difference = [
+                                    n.velocity[t-1][0] - p.velocity[t-1][0],
+                                    n.velocity[t-1][1] - p.velocity[t-1][1],
+                                    n.velocity[t-1][2] - p.velocity[t-1][2]
                                 ]
 
-                                n.viscosity[0] += viscosity_force[0] * 0.5
-                                n.viscosity[1] += viscosity_force[1] * 0.5
-                                n.viscosity[2] += viscosity_force[2] * 0.5
+                                visc_term_a = [
+                                    velocity_difference[0] * (n.mass / n.density),
+                                    velocity_difference[1] * (n.mass / n.density),
+                                    velocity_difference[2] * (n.mass / n.density)
+                                ]
+                                smoothing_visc = [
+                                    45/(math.pi * h**6) * (h - distance),
+                                    45/(math.pi * h**6) * (h - distance),
+                                    45/(math.pi * h**6) * (h - distance)
+                                ]
 
+                                viscosity_force[0] += visc_term_a[0] * smoothing_visc[0]
+                                viscosity_force[0] += visc_term_a[1] * smoothing_visc[1]
+                                viscosity_force[0] += visc_term_a[2] * smoothing_visc[2]
 
-                    p.density += density_near
+                                # SURFACE TENSION??
+                                # IMPLEMENT HERE
+                                
+                    viscosity_force[0] *= viscosity_factor
+                    viscosity_force[1] *= viscosity_factor
+                    viscosity_force[2] *= viscosity_factor
 
-                    p.pressure[0] -= pressure[0]
-                    p.pressure[0] -= pressure[1]
-                    p.pressure[0] -= pressure[2]
+                    buoyancy_force = 1 * (1000 - p.density) * 9.8
 
-                    # Make sure that viscocity is subtracted from the final velocity, it should be the inverse of whatever you do to the neighbor viscocity
-                    p.viscosity[0] += viscosity_force[0]
-                    p.viscosity[1] += viscosity_force[1]
-                    p.viscosity[2] += viscosity_force[2]
-                    
+                    external_force = [
+                        other_force[0] * p.density,
+                        other_force[1] * p.density,
+                        other_force[2] * p.density,
+                    ]
+
                     # CREATE A FORCE FACTOR
                     force = [
-                        p.pressure[0]/p.density + (mass * other_force[0]),
-                        p.pressure[1]/p.density + (mass * other_force[1]),
-                        p.pressure[2]/p.density + (mass * other_force[2])
+                        pressure_force[0] + viscosity_force[0] + external_force[0],
+                        pressure_force[1] + viscosity_force[1] + buoyancy_force + external_force[1],
+                        pressure_force[2] + viscosity_force[2] + external_force[2]
                     ]
 
                     # AFFECT THE VELOCITY WITH FORCE
                     p.velocity.append(
                                         [
-                                            p.velocity[t-1][0] + (force[0] * scale)/mass,
-                                            p.velocity[t-1][1] + (force[1] * scale)/mass,
-                                            p.velocity[t-1][2] + (force[2] * scale)/mass
+                                            p.velocity[t-1][0] + (force[0] * scale)/p.density,
+                                            p.velocity[t-1][1] + (force[1] * scale)/p.density,
+                                            p.velocity[t-1][2] + (force[2] * scale)/p.density
                                         ]
                                     )
-
-                    
-                    p.velocity[t][0] -= p.viscosity[0] * 0.5
-                    p.velocity[t][1] -= p.viscosity[1] * 0.5
-                    p.velocity[t][2] -= p.viscosity[2] * 0.5
                     
 
                     # CALCULATE AN "ADVECTED" POSITION (where the particle will move to)
@@ -297,17 +287,18 @@ def MFS_create_menu():
 
     cmds.menu("MFS_menu", label="Maya Fluid Simulator", parent="MayaWindow", tearOff=False)
 
-    print(os.getcwd())
+    project_path = cmds.workspace(query=True, rootDirectory=True)
 
-    cmds.menuItem(label="Open Maya Fluid Simulator", command=MFS_popup, image="D:/MFS_icon_solver_512.png")
+    cmds.menuItem(label="Open Maya Fluid Simulator", command=MFS_popup, image=os.path.join(project_path, "icons/MFS_icon_solver_512.png"))
 
 def MFS_popup(*args):
+
+    project_path = cmds.workspace(query=True, rootDirectory=True)
 
     cmds.window(title="Maya Fluid Simulator", widthHeight=(500, 500))
     col = cmds.columnLayout(adjustableColumn=True)
 
-    image_path = "D:/MFS_banner.png"
-    image = cmds.image(width=300, height=150, image=image_path)
+    image = cmds.image(width=300, height=150, image=os.path.join(project_path, "icons/MFS_banner.png"))
     
     pscaleCtrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=0.25, field=True, label="Particle Scale")
     domainCtrl = cmds.checkBox(label="Keep Domain", value=True)
