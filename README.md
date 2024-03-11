@@ -13,6 +13,7 @@ https://matthias-research.github.io/pages/publications/sca03.pdf
 https://github.com/Ceyron/machine-learning-and-simulation/blob/main/english/simulation_scripts/smoothed_particle_hydrodynamics_simple_python.py
 http://en.wikipedia.org/wiki/Smoothed-particle_hydrodynamics
 https://cg.informatik.uni-freiburg.de/publications/2014_EG_SPH_STAR.pdf
+https://nccastaff.bournemouth.ac.uk/jmacey/MastersProject/MSc16/15/thesis.pdf
 
 
 INSTALLATION:
