@@ -43,7 +43,6 @@ class MFS_Solver():
         bounding_box = cmds.exactWorldBoundingBox(self.domain_object)
 
         # taken from https://nccastaff.bournemouth.ac.uk/jmacey/MastersProject/MSc16/15/thesis.pdf
-        # TODO: The fluid is glitching! It looks as if it begins rotating around itself after hitting the floor. (check forces)
 
         total_particles = self.volume / 4 * math.pi * self.pscale**3 
         h = math.pow((3 * self.volume * max_neighbors)/(4 * math.pi * total_particles), 1/3) * 2
@@ -212,8 +211,6 @@ class MFS_Solver():
         external_force = [0, 0, 0]
         surface_normal = [0, 0, 0]
 
-        #TODO: Surface tension may need to be an extra force, potentially could be why the fluids arent behaving correctly.
-
         for p in self.points:
             for j in self.points:
                 if (j.id in p.neighbor_ids and j.id != p.id):
@@ -254,12 +251,15 @@ class MFS_Solver():
 
             tension_coeff = 0.1
 
-            curvature = 0
+            # The https://nccastaff.bournemouth.ac.uk/jmacey/MastersProject/MSc16/15/thesis.pdf requires that i take the divergence
+            # of the surface_normal, however my mathematics is not strong enough to write the function for that.
+            # TODO: Calculate the curvature by taking the divergence of surface_normal
+            curvature = -(0 / surface_len)
 
             surface_force = [
-                -(tension_coeff) * (curvature) * (surface_normal[0] / surface_len),
-                -(tension_coeff) * (curvature) * (surface_normal[1] / surface_len),
-                -(tension_coeff) * (curvature) * (surface_normal[2] / surface_len)
+                tension_coeff * curvature * surface_normal[0],
+                tension_coeff * curvature * surface_normal[1],
+                tension_coeff * curvature * surface_normal[2]
             ]
 
             viscosity_force[0] *= viscosity_factor
