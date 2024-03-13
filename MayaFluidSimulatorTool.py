@@ -182,7 +182,7 @@ class MFS_Solver():
                 
                 dist = math.sqrt(j_to_p[0]**2 + j_to_p[1]**2 + j_to_p[2]**2)
 
-                if (dist < search_dist and j.id != p.id):
+                if (dist < search_dist):
                     p.neighbor_ids.append(j.id)
 
 
@@ -210,12 +210,13 @@ class MFS_Solver():
         pressure_force = [0, 0, 0]
         viscosity_force = [0, 0, 0]
         external_force = [0, 0, 0]
+        surface_normal = [0, 0, 0]
 
         #TODO: Surface tension may need to be an extra force, potentially could be why the fluids arent behaving correctly.
 
         for p in self.points:
             for j in self.points:
-                if (j.id in p.neighbor_ids):
+                if (j.id in p.neighbor_ids and j.id != p.id):
                     j_to_p = [
                         p.position[t-1][0] - j.position[t-1][0],
                         p.position[t-1][1] - j.position[t-1][1],
@@ -225,9 +226,9 @@ class MFS_Solver():
                     pressure_term = (j.pressure + p.pressure)/2  * (j.mass / j.density)
                     smoothing = wspiky_grad(j_to_p, h)
 
-                    pressure_force[0] -= pressure_term + smoothing[0]
-                    pressure_force[1] -= pressure_term + smoothing[1]
-                    pressure_force[2] -= pressure_term + smoothing[2]
+                    pressure_force[0] -= pressure_term * smoothing[0]
+                    pressure_force[1] -= pressure_term * smoothing[1]
+                    pressure_force[2] -= pressure_term * smoothing[2]
 
                     velocity_diff = [
                         j.velocity[t-1][0] - p.velocity[t-1][0],
@@ -242,6 +243,24 @@ class MFS_Solver():
                     viscosity_force[1] += velocity_diff[1] * viscosity_term * viscosity_smoothing
                     viscosity_force[2] += velocity_diff[2] * viscosity_term * viscosity_smoothing
 
+                    color_grad = wpoly_6_grad(j_to_p, h)
+
+                    surface_normal[0] += (j.mass / j.density) * color_grad[0]
+                    surface_normal[1] += (j.mass / j.density) * color_grad[1]
+                    surface_normal[2] += (j.mass / j.density) * color_grad[2]
+
+
+            surface_len = math.sqrt(surface_normal[0]**2 + surface_normal[1]**2 + surface_normal[2]**2)
+
+            tension_coeff = 0.1
+
+            curvature = 0
+
+            surface_force = [
+                -(tension_coeff) * (curvature) * (surface_normal[0] / surface_len),
+                -(tension_coeff) * (curvature) * (surface_normal[1] / surface_len),
+                -(tension_coeff) * (curvature) * (surface_normal[2] / surface_len)
+            ]
 
             viscosity_force[0] *= viscosity_factor
             viscosity_force[1] *= viscosity_factor
@@ -254,9 +273,9 @@ class MFS_Solver():
             ]
 
             p.total_force = [
-                pressure_force[0] + viscosity_force[0] + external_force[0],
-                pressure_force[1] + viscosity_force[1] + external_force[1],
-                pressure_force[2] + viscosity_force[2] + external_force[2]
+                pressure_force[0] + viscosity_force[0] + surface_force[0] + external_force[0],
+                pressure_force[1] + viscosity_force[1] + surface_force[0] + external_force[1],
+                pressure_force[2] + viscosity_force[2] + surface_force[0] + external_force[2]
             ]
         
     def calc_velocity(self, bbox, t, scale, h):
@@ -563,7 +582,9 @@ def wpoly_6_grad(r, h):
 def wspiky_grad(r, h):
     dist = math.sqrt(r[0]**2 + r[1]**2 + r[2]**2)
     const = -45/(math.pi * h**6) * (h-dist)**2
-
+    if (dist == 0):
+        return [0, 0, 0]
+        
     return [
         const * r[0]/dist,
         const * r[1]/dist,
@@ -573,6 +594,9 @@ def wspiky_grad(r, h):
 def wvisc_lap(r, h):
     dist = math.sqrt(r[0]**2 + r[1]**2 + r[2]**2)
     return 45/(math.pi*h**6) * (h-dist)
+
+def divergence(r):
+    return 
 
 if __name__ == "__main__":
     MFS_create_menu()
