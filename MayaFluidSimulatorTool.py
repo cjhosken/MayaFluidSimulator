@@ -12,9 +12,11 @@ class MFS_Particle():
         self.id = -1
         self.position = [[0, 0, 0]]
         self.velocity = [[0, 0, 0]]
-        self.mass = 1
-        self.density = 1000
+        self.mass = 0.02
+        self.density = 0
         self.pressure = 0
+        self.neighbor_ids = []
+        self.total_force = [0, 0, 0]
 
     def speed(self, t):
         return math.sqrt(math.pow(self.velocity[t][0],2) + math.pow(self.velocity[t][1],2) + math.pow(self.velocity[t][2],2))
@@ -30,161 +32,56 @@ class MFS_Solver():
     domain_object = None
     solved = False
     initialized = False
+    volume = 0
     pscale = 0
 
     def update(self, start, end, other_force, init_vel, viscosity_factor, scale):
         t = (int(cmds.currentTime(query=True)) - start)
 
+        max_neighbors = 4
+
+        bounding_box = cmds.exactWorldBoundingBox(self.domain_object)
+
+        # taken from https://nccastaff.bournemouth.ac.uk/jmacey/MastersProject/MSc16/15/thesis.pdf
+
+        total_particles = self.volume / 4 * math.pi * self.pscale**3 
+        h = math.pow((3 * self.volume * max_neighbors)/(4 * math.pi * total_particles), 1/3) * 2
+
         if (not self.solved):
-            for p in self.points:        
-                if (t==0):
+            if (t==0):
+                for p in self.points:
+                    # Initialize System
+                    p.mass = 0.02
+
+                    # compute hash maps
+
+                    self.find_neighbors(1)
+
+                    self.calc_density_and_pressure(1, h)
+
+                    self.calc_forces(t, other_force, viscosity_factor, h)
+
                     p.velocity[0] = [
-                        init_vel[0] * scale,
-                        init_vel[1] * scale,
-                        init_vel[2] * scale
+                        ((p.total_force[0] / p.density) + init_vel[0]) * scale, 
+                        ((p.total_force[1] / p.density) + init_vel[1]) * scale, 
+                        ((p.total_force[2] / p.density) + init_vel[2]) * scale
                     ]
 
-                    cmds.cutKey(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", time=(0,end), attribute='translateX', option="keys" )
-                    cmds.cutKey(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", time=(0,end), attribute='translateY', option="keys" )
-                    cmds.cutKey(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", time=(0,end), attribute='translateZ', option="keys" )
-                else:
-                    bounding_box = cmds.exactWorldBoundingBox(self.domain_object)
-                    min_point = om.MPoint(bounding_box[0], bounding_box[1], bounding_box[2])
-                    max_point = om.MPoint(bounding_box[3], bounding_box[4], bounding_box[5])
-
-                    # taken from https://nccastaff.bournemouth.ac.uk/jmacey/MastersProject/MSc16/15/thesis.pdf
-                    max_neighbors = 3
-                    total_particles = len(self.points)
-
-                    # kerneldist is the radius size of the neighbors search
-                    kerneldist = self.pscale * max_neighbors
-
-                    # kfac is the gas stiffness constant
-                    kfac = 0.01
-                    h = math.pow((3 * self.volume * max_neighbors) / (4*math.pi * total_particles), 1/3)
-
-                    p.pressure = kfac * p.density
-
-                    pressure_force = [0, 0, 0]
-                    viscosity_force = [0, 0, 0]
-
-                    for n in self.points:
-                        if (n.id != p.id):
-                            p_to_n = [
-                                n.position[t-1][0] - p.position[t-1][0],
-                                n.position[t-1][1] - p.position[t-1][1],
-                                n.position[t-1][2] - p.position[t-1][2]
-                            ]
+                    cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateX', t=t+start, v=p.position[0][0])
+                    cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', t=t+start, v=p.position[0][1])
+                    cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateZ', t=t+start, v=p.position[0][2])
+            else:
 
 
-                            distance = math.sqrt(p_to_n[0]**2 + p_to_n[1]**2 + p_to_n[2]**2)
+                self.update_position(start, t, scale)
 
-                            if (distance < kerneldist):
-                                # CALCULATE PRESSURE
-                                term_a = ((p.pressure + n.pressure) / 2) * (n.mass / n.density)
-                                smoothing = [
-                                    (45 / (math.pi * h**6)) * (p_to_n[0]/distance) * (h - distance)**2,
-                                    (45 / (math.pi * h**6)) * (p_to_n[1]/distance) * (h - distance)**2,
-                                    (45 / (math.pi * h**6)) * (p_to_n[2]/distance) * (h - distance)**2
+                self.find_neighbors(t)
 
-                                ]
+                self.calc_density_and_pressure(t, h)
 
-                                pressure_force[0] -= term_a*smoothing[0]
-                                pressure_force[1] -= term_a*smoothing[1]
-                                pressure_force[2] -= term_a*smoothing[2]
+                self.calc_forces(t, other_force, viscosity_factor, h)
 
-
-                                # CALCULATE VISCOSITY
-
-                                velocity_difference = [
-                                    n.velocity[t-1][0] - p.velocity[t-1][0],
-                                    n.velocity[t-1][1] - p.velocity[t-1][1],
-                                    n.velocity[t-1][2] - p.velocity[t-1][2]
-                                ]
-
-                                visc_term_a = [
-                                    velocity_difference[0] * (n.mass / n.density),
-                                    velocity_difference[1] * (n.mass / n.density),
-                                    velocity_difference[2] * (n.mass / n.density)
-                                ]
-                                smoothing_visc = [
-                                    45/(math.pi * h**6) * (h - distance),
-                                    45/(math.pi * h**6) * (h - distance),
-                                    45/(math.pi * h**6) * (h - distance)
-                                ]
-
-                                viscosity_force[0] += visc_term_a[0] * smoothing_visc[0]
-                                viscosity_force[0] += visc_term_a[1] * smoothing_visc[1]
-                                viscosity_force[0] += visc_term_a[2] * smoothing_visc[2]
-
-                                # SURFACE TENSION??
-                                # IMPLEMENT HERE
-                                
-                    viscosity_force[0] *= viscosity_factor
-                    viscosity_force[1] *= viscosity_factor
-                    viscosity_force[2] *= viscosity_factor
-
-                    buoyancy_force = 1 * (1000 - p.density) * 9.8
-
-                    external_force = [
-                        other_force[0] * p.density,
-                        other_force[1] * p.density,
-                        other_force[2] * p.density,
-                    ]
-
-                    # CREATE A FORCE FACTOR
-                    force = [
-                        pressure_force[0] + viscosity_force[0] + external_force[0],
-                        pressure_force[1] + viscosity_force[1] + buoyancy_force + external_force[1],
-                        pressure_force[2] + viscosity_force[2] + external_force[2]
-                    ]
-
-                    # AFFECT THE VELOCITY WITH FORCE
-                    p.velocity.append(
-                                        [
-                                            p.velocity[t-1][0] + (force[0] * scale)/p.density,
-                                            p.velocity[t-1][1] + (force[1] * scale)/p.density,
-                                            p.velocity[t-1][2] + (force[2] * scale)/p.density
-                                        ]
-                                    )
-                    
-
-                    # CALCULATE AN "ADVECTED" POSITION (where the particle will move to)
-                    advected = [
-                        p.position[t-1][0] + (p.velocity[t][0]) * scale,
-                        p.position[t-1][1] + (p.velocity[t][1]) * scale,
-                        p.position[t-1][2] + (p.velocity[t][2]) * scale
-                    ]
-
-                    wall_damping = 1
-
-                    # CHECK BOUNDARIES
-                    if (advected[0] < min_point[0] or advected[0] > max_point[0]):
-                        p.velocity[t][0] = -p.velocity[t][0] * wall_damping
-
-                    if (advected[1] < min_point[1] or advected[1] > max_point[1]):
-                        p.velocity[t][1] = -p.velocity[t][1] * wall_damping
-                        
-                    if (advected[2] < min_point[2] or advected[2] > max_point[2]):
-                        p.velocity[t][2] = -p.velocity[t][2] * wall_damping
-
-                    if (p.speed(t) < 0.1):
-                        p.velocity[t] = [0, 0, 0]
-
-
-                    # UPDATE POSITION
-                    p.position.append(
-                                        [
-                                            p.position[t-1][0] + (p.velocity[t][0]) * scale, 
-                                            p.position[t-1][1] + (p.velocity[t][1]) * scale, 
-                                            p.position[t-1][2] + (p.velocity[t][2]) * scale
-                                        ]
-                                    )
-
-                cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateX', t=t+start, v=p.position[t][0])
-                cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', t=t+start, v=p.position[t][1])
-                cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateZ', t=t+start, v=p.position[t][2])
-
+                self.calc_velocity(bounding_box, t, scale, h)
 
     def clear(self, keepDomain):
         if (self.initialized):
@@ -203,7 +100,7 @@ class MFS_Solver():
     def clearSim(self, start, end):
         for p in self.points:
             p.velocity = [
-                        p.velocity[0]
+                p.velocity[0]
                     ]
 
             p.position = [
@@ -223,7 +120,6 @@ class MFS_Solver():
 
     def point_distribute(self, pscale):
         self.pscale = pscale
-
 
         bounding_box = cmds.exactWorldBoundingBox(self.source_object)
         min_point = om.MPoint(bounding_box[0], bounding_box[1], bounding_box[2])
@@ -273,9 +169,162 @@ class MFS_Solver():
             cmds.progressWindow(e=1, progress=progress, status=f'Progress: {progress}%')
 
         self.volume = (max_point[0] - min_point[0]) * (max_point[1] - min_point[1]) * (max_point[2] - min_point[2])
-
+        
         #self.update()
         cmds.progressWindow(endProgress=1)
+
+    def find_neighbors(self, t):
+        search_dist = 3 * self.pscale
+
+        for p in self.points:
+            p.neighbor_ids = []
+            p.total_force = [0, 0, 0]
+
+            for j in self.points:
+                j_to_p = [
+                        p.position[t-1][0] - j.position[t-1][0],
+                        p.position[t-1][1] - j.position[t-1][1],
+                        p.position[t-1][2] - j.position[t-1][2]
+                    ]
+                
+                dist = math.sqrt(j_to_p[0]**2 + j_to_p[1]**2 + j_to_p[2]**2)
+
+                if (dist < search_dist and j.id != p.id):
+                    p.neighbor_ids.append(j.id)
+
+
+    def calc_density_and_pressure(self, t, h):
+        rest_density = 998.2
+        kfac = 0.2
+
+        for p in self.points:
+            p.density = rest_density
+
+            for j in self.points:
+                if (j.id in p.neighbor_ids):
+                    
+                    j_to_p = [
+                        p.position[t-1][0] - j.position[t-1][0],
+                        p.position[t-1][1] - j.position[t-1][1],
+                        p.position[t-1][2] - j.position[t-1][2]
+                    ]
+
+                    p.density += j.mass * wpoly_6(j_to_p, h)
+
+            p.pressure = kfac * p.density
+
+    def calc_forces(self, t, other_force, viscosity_factor, h):
+        pressure_force = [0, 0, 0]
+        viscosity_force = [0, 0, 0]
+        external_force = [0, 0, 0]
+
+        for p in self.points:
+            for j in self.points:
+                if (j.id in p.neighbor_ids):
+                    j_to_p = [
+                        p.position[t-1][0] - j.position[t-1][0],
+                        p.position[t-1][1] - j.position[t-1][1],
+                        p.position[t-1][2] - j.position[t-1][2]
+                    ]
+
+                    pressure_term = (j.pressure + p.pressure)/2  * (j.mass / j.density)
+                    smoothing = wspiky_grad(j_to_p, h)
+
+                    pressure_force[0] -= pressure_term + smoothing[0]
+                    pressure_force[1] -= pressure_term + smoothing[1]
+                    pressure_force[2] -= pressure_term + smoothing[2]
+
+                    velocity_diff = [
+                        j.velocity[t-1][0] - p.velocity[t-1][0],
+                        j.velocity[t-1][1] - p.velocity[t-1][1],
+                        j.velocity[t-1][2] - p.velocity[t-1][2]
+                    ]
+
+                    viscosity_term = j.mass / j.density
+                    viscosity_smoothing = wvisc_lap(velocity_diff, h)
+
+                    viscosity_force[0] += velocity_diff[0] * viscosity_term * viscosity_smoothing
+                    viscosity_force[1] += velocity_diff[1] * viscosity_term * viscosity_smoothing
+                    viscosity_force[2] += velocity_diff[2] * viscosity_term * viscosity_smoothing
+
+
+            viscosity_force[0] *= viscosity_factor
+            viscosity_force[1] *= viscosity_factor
+            viscosity_force[2] *= viscosity_factor
+
+            external_force = [
+                other_force[0] * p.density, 
+                other_force[1] * p.density, 
+                other_force[2] * p.density
+            ]
+
+            p.total_force = [
+                pressure_force[0] + viscosity_force[0] + external_force[0],
+                pressure_force[1] + viscosity_force[1] + external_force[1],
+                pressure_force[2] + viscosity_force[2] + external_force[2]
+            ]
+        
+    def calc_velocity(self, bbox, t, scale, h):
+        min_point = om.MPoint(bbox[0], bbox[1], bbox[2])
+        max_point = om.MPoint(bbox[3], bbox[4], bbox[5])
+
+        for p in self.points:
+            p.velocity.append([
+                p.velocity[t-1][0] + (p.total_force[0] / p.density) * scale, 
+                p.velocity[t-1][1] + (p.total_force[1] / p.density) * scale, 
+                p.velocity[t-1][2] + (p.total_force[2] / p.density) * scale
+            ])
+
+            xsph_term = 0
+
+            for j in self.points:
+                j_to_p = [
+                    p.position[t-1][0] - j.position[t-1][0],
+                    p.position[t-1][1] - j.position[t-1][1],
+                    p.position[t-1][2] - j.position[t-1][2]
+                ]
+
+                xsph_term += ((2 * j.mass) / (p.density + j.density)) * wpoly_6(j_to_p, h)
+            
+            vel_smooth = 0.1
+
+            p.velocity[t] = [
+                p.velocity[t][0] + vel_smooth * xsph_term,
+                p.velocity[t][1] + vel_smooth * xsph_term,
+                p.velocity[t][2] + vel_smooth * xsph_term
+            ]
+
+            advected = [
+                p.position[t-1][0] + p.velocity[t][0] * scale,
+                p.position[t-1][1] + p.velocity[t][1] * scale,
+                p.position[t-1][2] + p.velocity[t][2] * scale
+            ]
+
+            floor_damping = 0.3
+
+            if (advected[0] < min_point[0] or advected[0] > max_point[0]):
+                p.velocity[t][0] = -p.velocity[t][0]
+
+            if (advected[1] < min_point[1] or advected[1] > max_point[1]):
+                p.velocity[t][1] = -p.velocity[t][1] * floor_damping
+                                
+            if (advected[2] < min_point[2] or advected[2] > max_point[2]):
+                p.velocity[t][2] = -p.velocity[t][2]
+
+    def update_position(self, start, t, scale):
+        for p in self.points:
+
+            p.position.append(
+                [
+                    p.position[t-1][0] + p.velocity[t-1][0] * scale,
+                    p.position[t-1][1] + p.velocity[t-1][1] * scale,
+                    p.position[t-1][2] + p.velocity[t-1][2] * scale
+                ]
+            )
+
+            cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateX', t=t+start, v=p.position[t][0])
+            cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', t=t+start, v=p.position[t][1])
+            cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateZ', t=t+start, v=p.position[t][2])
 
 solvers = []
 
@@ -321,7 +370,7 @@ def MFS_popup(*args):
     
     cmds.rowLayout(numberOfColumns=3)
     timeCtrl = cmds.intFieldGrp(numberOfFields=2, value1=1, value2=120, label="Frame Range")
-    tsCtrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.05, field=True, label="Time Scale")
+    tsCtrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.1, field=True, label="Time Scale")
 
     cmds.columnLayout(adjustableColumn=True, parent=col)
 
@@ -496,8 +545,39 @@ def MFS_clearSolver(timeCtrl):
             solver.clearSim(frameRange[0], frameRange[1])
 
 
-def divergence(value):
-    return 1
+def wpoly_6(r, h):
+    dist = math.sqrt(r[0]**2 + r[1]**2 + r[2]**2)
+
+    if (dist <= h):
+        return (315/(64*math.pi*h**9)) * (h**2 - dist**2)**3
+    else:
+        return 0
+
+def wpoly_6_grad(r, h):
+    constant = (-945/(32*math.pi*h**9)) 
+    dist = math.sqrt(r[0]**2 + r[1]**2 + r[2]**2)
+
+    end = (h**2 - dist**2)**2
+
+    return [
+        constant * r[0] * end,
+        constant * r[1] * end,
+        constant * r[2] * end
+    ]
+
+def wspiky_grad(r, h):
+    dist = math.sqrt(r[0]**2 + r[1]**2 + r[2]**2)
+    const = -45/(math.pi * h**6) * (h-dist)**2
+
+    return [
+        const * r[0]/dist,
+        const * r[1]/dist,
+        const * r[2]/dist
+    ]
+
+def wvisc_lap(r, h):
+    dist = math.sqrt(r[0]**2 + r[1]**2 + r[2]**2)
+    return 45/(math.pi*h**6) * (h-dist)
 
 if __name__ == "__main__":
     MFS_create_menu()
