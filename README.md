@@ -22,7 +22,6 @@ INSTALLATION:
 
 TODOS:
 
-1. implement neigbor detection and calculation
-2. divergence calculation
-3. speed up
-4. particles currently source in bounding box, not the object
+1. fix fluid behavior
+2. speed up (hashmap search)
+3. particles currently source in bounding box, not the object

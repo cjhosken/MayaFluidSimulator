@@ -43,17 +43,16 @@ class MFS_Solver():
         bounding_box = cmds.exactWorldBoundingBox(self.domain_object)
 
         # taken from https://nccastaff.bournemouth.ac.uk/jmacey/MastersProject/MSc16/15/thesis.pdf
+        # TODO: The fluid is glitching! It looks as if it begins rotating around itself after hitting the floor. (check forces)
 
         total_particles = self.volume / 4 * math.pi * self.pscale**3 
         h = math.pow((3 * self.volume * max_neighbors)/(4 * math.pi * total_particles), 1/3) * 2
 
         if (not self.solved):
+            # TODO: Currently, the first frame seems to take MUCH longer to calculate than the rest, look into why that's the case.
             if (t==0):
                 for p in self.points:
-                    # Initialize System
                     p.mass = 0.02
-
-                    # compute hash maps
 
                     self.find_neighbors(1)
 
@@ -71,8 +70,6 @@ class MFS_Solver():
                     cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', t=t+start, v=p.position[0][1])
                     cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateZ', t=t+start, v=p.position[0][2])
             else:
-
-
                 self.update_position(start, t, scale)
 
                 self.find_neighbors(t)
@@ -114,9 +111,6 @@ class MFS_Solver():
             cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateX', t=start, v=p.position[0][0])
             cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', t=start, v=p.position[0][1])
             cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateZ', t=start, v=p.position[0][2])
-
-# MAKE A FUNCTION THAT DISTRIBUTES POINTS EVENLY (OR RANDOMLY) INSIDE OF AN OBJECT
-# MAY NEED TO SET UP CUDA AND NUMPY FOR THIS
 
     def point_distribute(self, pscale):
         self.pscale = pscale
@@ -169,11 +163,10 @@ class MFS_Solver():
             cmds.progressWindow(e=1, progress=progress, status=f'Progress: {progress}%')
 
         self.volume = (max_point[0] - min_point[0]) * (max_point[1] - min_point[1]) * (max_point[2] - min_point[2])
-        
-        #self.update()
         cmds.progressWindow(endProgress=1)
 
     def find_neighbors(self, t):
+        # TODO: The current neighbor search is to check points within a certain radius. However hashmaps are much faster. Look into implementing that.
         search_dist = 3 * self.pscale
 
         for p in self.points:
@@ -217,6 +210,8 @@ class MFS_Solver():
         pressure_force = [0, 0, 0]
         viscosity_force = [0, 0, 0]
         external_force = [0, 0, 0]
+
+        #TODO: Surface tension may need to be an extra force, potentially could be why the fluids arent behaving correctly.
 
         for p in self.points:
             for j in self.points:
