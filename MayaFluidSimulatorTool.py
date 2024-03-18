@@ -5,6 +5,62 @@ import math
 import random
 import sys
 
+# ------ MENUS & BUTTON FUNCTIONS------
+
+def MFS_create_menu():
+
+    MFS_delete_menu()
+
+    cmds.menu("MFS_menu", label="Maya Fluid Simulator", parent="MayaWindow", tearOff=False)
+
+    project_path = cmds.workspace(query=True, rootDirectory=True)
+
+    cmds.menuItem(label="Open Maya Fluid Simulator", command=MFS_popup, image=os.path.join(project_path, "icons/MFS_icon_solver_512.png"))
+
+def MFS_popup(*args):
+
+    project_path = cmds.workspace(query=True, rootDirectory=True)
+
+    cmds.window(title="Maya Fluid Simulator", widthHeight=(500, 500))
+    col = cmds.columnLayout(adjustableColumn=True)
+
+    image = cmds.image(width=300, height=150, image=os.path.join(project_path, "icons/MFS_banner.png"))
+    
+    pscaleCtrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=0.25, field=True, label="Particle Scale")
+    domainCtrl = cmds.checkBox(label="Keep Domain", value=True)
+    
+    cmds.rowLayout(numberOfColumns=2)
+
+    cmds.button(label="Initialize", command=lambda *args:MFS_initializeSolver(pscaleCtrl, domainCtrl))
+    cmds.button(label="X", command=lambda *args:MFS_deleteSolver())
+
+    cmds.columnLayout(adjustableColumn=True, parent=col)
+
+    # gravity
+    forceCtrl = cmds.floatFieldGrp( numberOfFields=3, label='Force', extraLabel='cm', value1=0, value2=-9.8, value3=0 )
+
+    # viscosity
+    viscCtrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=0.1, field=True, label="Viscosity")
+
+    # velocity
+    velCtrl = cmds.floatFieldGrp( numberOfFields=3, label='Initial Velocity', extraLabel='cm', value1=0, value2=0, value3=0 )
+    
+    cmds.rowLayout(numberOfColumns=3)
+    timeCtrl = cmds.intFieldGrp(numberOfFields=2, value1=1, value2=120, label="Frame Range")
+    tsCtrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.1, field=True, label="Time Scale")
+
+    cmds.columnLayout(adjustableColumn=True, parent=col)
+
+    cmds.rowLayout(numberOfColumns=2)
+    cmds.button(label="Solve", command=lambda *args:MFS_runSolver(timeCtrl, forceCtrl, viscCtrl, velCtrl, tsCtrl))
+    cmds.button(label="X", command=lambda *args:MFS_clearSolver(timeCtrl))
+        
+    cmds.showWindow()
+
+def MFS_delete_menu():
+    if cmds.menu("MFS_menu", exists=True):
+        cmds.deleteUI("MFS_menu", menu=True)
+
 # ------ CLASSES ------
 
 class MFS_Particle():
@@ -26,6 +82,10 @@ class MFS_Particle():
         return cmds.colorIndex(1, 210, 1/s, s, hsv=True)
 
 
+# GLOBAL VARIABLE
+solvers = []
+
+
 class MFS_Solver():
     points = []
     source_object = None
@@ -34,82 +94,6 @@ class MFS_Solver():
     initialized = False
     volume = 0
     pscale = 0
-
-    def update(self, start, end, other_force, init_vel, viscosity_factor, scale):
-        t = (int(cmds.currentTime(query=True)) - start)
-
-        max_neighbors = 4
-
-        bounding_box = cmds.exactWorldBoundingBox(self.domain_object)
-
-        # taken from https://nccastaff.bournemouth.ac.uk/jmacey/MastersProject/MSc16/15/thesis.pdf
-
-        total_particles = self.volume / 4 * math.pi * self.pscale**3 
-        h = math.pow((3 * self.volume * max_neighbors)/(4 * math.pi * total_particles), 1/3) * 2
-
-        if (not self.solved):
-            # TODO: Currently, the first frame seems to take MUCH longer to calculate than the rest, look into why that's the case.
-            if (t==0):
-                for p in self.points:
-                    p.mass = 0.02
-
-                    self.find_neighbors(1)
-
-                    self.calc_density_and_pressure(1, h)
-
-                    self.calc_forces(t, other_force, viscosity_factor, h)
-
-                    p.velocity[0] = [
-                        ((p.total_force[0] / p.density) + init_vel[0]) * scale, 
-                        ((p.total_force[1] / p.density) + init_vel[1]) * scale, 
-                        ((p.total_force[2] / p.density) + init_vel[2]) * scale
-                    ]
-
-                    cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateX', t=t+start, v=p.position[0][0])
-                    cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', t=t+start, v=p.position[0][1])
-                    cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateZ', t=t+start, v=p.position[0][2])
-            else:
-                self.update_position(start, t, scale)
-
-                self.find_neighbors(t)
-
-                self.calc_density_and_pressure(t, h)
-
-                self.calc_forces(t, other_force, viscosity_factor, h)
-
-                self.calc_velocity(bounding_box, t, scale, h)
-
-    def clear(self, keepDomain):
-        if (self.initialized):
-            if (self.domain_object is not None and cmds.objExists(self.domain_object) and not keepDomain):
-                cmds.delete(self.domain_object)
-
-        cmds.setAttr(self.source_object + '.overrideShading', 1)
-        cmds.setAttr(self.source_object + '.overrideEnabled', 0)
-        
-        self.points = []
-        self.source_object = None
-        self.domain_object = None
-        self.solved = False
-        self.initialized = False
-
-    def clearSim(self, start, end):
-        for p in self.points:
-            p.velocity = [
-                p.velocity[0]
-                    ]
-
-            p.position = [
-                p.position[0]
-            ]
-
-            cmds.cutKey(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", time=(0,end), attribute='translateX', option="keys" )
-            cmds.cutKey(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", time=(0,end), attribute='translateY', option="keys" )
-            cmds.cutKey(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", time=(0,end), attribute='translateZ', option="keys" )
-
-            cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateX', t=start, v=p.position[0][0])
-            cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', t=start, v=p.position[0][1])
-            cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateZ', t=start, v=p.position[0][2])
 
     def point_distribute(self, pscale):
         self.pscale = pscale
@@ -164,6 +148,50 @@ class MFS_Solver():
         self.volume = (max_point[0] - min_point[0]) * (max_point[1] - min_point[1]) * (max_point[2] - min_point[2])
         cmds.progressWindow(endProgress=1)
 
+    def update(self, start, end, other_force, init_vel, viscosity_factor, scale):
+        t = (int(cmds.currentTime(query=True)) - start)
+
+        max_neighbors = 4
+
+        bounding_box = cmds.exactWorldBoundingBox(self.domain_object)
+
+        # taken from https://nccastaff.bournemouth.ac.uk/jmacey/MastersProject/MSc16/15/thesis.pdf
+
+        total_particles = self.volume / 4 * math.pi * self.pscale**3 
+        h = math.pow((3 * self.volume * max_neighbors)/(4 * math.pi * total_particles), 1/3) * 2
+
+        if (not self.solved):
+            # TODO: Currently, the first frame seems to take MUCH longer to calculate than the rest, look into why that's the case.
+            if (t==0):
+                for p in self.points:
+                    p.mass = 0.02
+
+                    self.find_neighbors(1)
+
+                    self.calc_density_and_pressure(1, h)
+
+                    self.calc_forces(t, other_force, viscosity_factor, h)
+
+                    p.velocity[0] = [
+                        ((p.total_force[0] / p.density) + init_vel[0]) * scale, 
+                        ((p.total_force[1] / p.density) + init_vel[1]) * scale, 
+                        ((p.total_force[2] / p.density) + init_vel[2]) * scale
+                    ]
+
+                    cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateX', t=t+start, v=p.position[0][0])
+                    cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', t=t+start, v=p.position[0][1])
+                    cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateZ', t=t+start, v=p.position[0][2])
+            else:
+                self.update_position(start, t, scale)
+
+                self.find_neighbors(t)
+
+                self.calc_density_and_pressure(t, h)
+
+                self.calc_forces(t, other_force, viscosity_factor, h)
+
+                self.calc_velocity(bounding_box, t, scale, h)
+
     def find_neighbors(self, t):
         # TODO: The current neighbor search is to check points within a certain radius. However hashmaps are much faster. Look into implementing that.
         search_dist = 3 * self.pscale
@@ -209,7 +237,6 @@ class MFS_Solver():
         pressure_force = [0, 0, 0]
         viscosity_force = [0, 0, 0]
         external_force = [0, 0, 0]
-        surface_normal = [0, 0, 0]
 
         for p in self.points:
             for j in self.points:
@@ -240,28 +267,6 @@ class MFS_Solver():
                     viscosity_force[1] += velocity_diff[1] * viscosity_term * viscosity_smoothing
                     viscosity_force[2] += velocity_diff[2] * viscosity_term * viscosity_smoothing
 
-                    color_grad = wpoly_6_grad(j_to_p, h)
-
-                    surface_normal[0] += (j.mass / j.density) * color_grad[0]
-                    surface_normal[1] += (j.mass / j.density) * color_grad[1]
-                    surface_normal[2] += (j.mass / j.density) * color_grad[2]
-
-
-            surface_len = math.sqrt(surface_normal[0]**2 + surface_normal[1]**2 + surface_normal[2]**2)
-
-            tension_coeff = 0.1
-
-            # The https://nccastaff.bournemouth.ac.uk/jmacey/MastersProject/MSc16/15/thesis.pdf requires that i take the divergence
-            # of the surface_normal, however my mathematics is not strong enough to write the function for that.
-            # TODO: Calculate the curvature by taking the divergence of surface_normal
-            curvature = -(0 / surface_len)
-
-            surface_force = [
-                tension_coeff * curvature * surface_normal[0],
-                tension_coeff * curvature * surface_normal[1],
-                tension_coeff * curvature * surface_normal[2]
-            ]
-
             viscosity_force[0] *= viscosity_factor
             viscosity_force[1] *= viscosity_factor
             viscosity_force[2] *= viscosity_factor
@@ -273,9 +278,9 @@ class MFS_Solver():
             ]
 
             p.total_force = [
-                pressure_force[0] + viscosity_force[0] + surface_force[0] + external_force[0],
-                pressure_force[1] + viscosity_force[1] + surface_force[0] + external_force[1],
-                pressure_force[2] + viscosity_force[2] + surface_force[0] + external_force[2]
+                pressure_force[0] + viscosity_force[0] + external_force[0],
+                pressure_force[1] + viscosity_force[1] + external_force[1],
+                pressure_force[2] + viscosity_force[2] + external_force[2]
             ]
         
     def calc_velocity(self, bbox, t, scale, h):
@@ -340,96 +345,37 @@ class MFS_Solver():
             cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', t=t+start, v=p.position[t][1])
             cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateZ', t=t+start, v=p.position[t][2])
 
-solvers = []
+    def clear(self, keepDomain):
+        if (self.initialized):
+            if (self.domain_object is not None and cmds.objExists(self.domain_object) and not keepDomain):
+                cmds.delete(self.domain_object)
 
-# ------ MENUS & BUTTON FUNCTIONS------
-
-def MFS_create_menu():
-
-    MFS_delete_menu()
-
-    cmds.menu("MFS_menu", label="Maya Fluid Simulator", parent="MayaWindow", tearOff=False)
-
-    project_path = cmds.workspace(query=True, rootDirectory=True)
-
-    cmds.menuItem(label="Open Maya Fluid Simulator", command=MFS_popup, image=os.path.join(project_path, "icons/MFS_icon_solver_512.png"))
-
-def MFS_popup(*args):
-
-    project_path = cmds.workspace(query=True, rootDirectory=True)
-
-    cmds.window(title="Maya Fluid Simulator", widthHeight=(500, 500))
-    col = cmds.columnLayout(adjustableColumn=True)
-
-    image = cmds.image(width=300, height=150, image=os.path.join(project_path, "icons/MFS_banner.png"))
-    
-    pscaleCtrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=0.25, field=True, label="Particle Scale")
-    domainCtrl = cmds.checkBox(label="Keep Domain", value=True)
-    
-    cmds.rowLayout(numberOfColumns=2)
-
-    cmds.button(label="Initialize", command=lambda *args:MFS_initializeSolver(pscaleCtrl, domainCtrl))
-    cmds.button(label="X", command=lambda *args:MFS_deleteSolver())
-
-    cmds.columnLayout(adjustableColumn=True, parent=col)
-
-    # gravity
-    forceCtrl = cmds.floatFieldGrp( numberOfFields=3, label='Force', extraLabel='cm', value1=0, value2=-9.8, value3=0 )
-
-    # viscosity
-    viscCtrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=0.1, field=True, label="Viscosity")
-
-    # velocity
-    velCtrl = cmds.floatFieldGrp( numberOfFields=3, label='Initial Velocity', extraLabel='cm', value1=0, value2=0, value3=0 )
-    
-    cmds.rowLayout(numberOfColumns=3)
-    timeCtrl = cmds.intFieldGrp(numberOfFields=2, value1=1, value2=120, label="Frame Range")
-    tsCtrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.1, field=True, label="Time Scale")
-
-    cmds.columnLayout(adjustableColumn=True, parent=col)
-
-    cmds.rowLayout(numberOfColumns=2)
-    cmds.button(label="Solve", command=lambda *args:MFS_runSolver(timeCtrl, forceCtrl, viscCtrl, velCtrl, tsCtrl))
-    cmds.button(label="X", command=lambda *args:MFS_clearSolver(timeCtrl))
+        cmds.setAttr(self.source_object + '.overrideShading', 1)
+        cmds.setAttr(self.source_object + '.overrideEnabled', 0)
         
-    cmds.showWindow()
+        self.points = []
+        self.source_object = None
+        self.domain_object = None
+        self.solved = False
+        self.initialized = False
 
-def MFS_delete_menu():
-    if cmds.menu("MFS_menu", exists=True):
-        cmds.deleteUI("MFS_menu", menu=True)
+    def clearSim(self, start, end):
+        for p in self.points:
+            p.velocity = [
+                p.velocity[0]
+                    ]
 
+            p.position = [
+                p.position[0]
+            ]
 
-def MFS_deleteSolver(*args):
-    selected_objects = cmds.ls(selection=True)
+            cmds.cutKey(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", time=(0,end), attribute='translateX', option="keys" )
+            cmds.cutKey(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", time=(0,end), attribute='translateY', option="keys" )
+            cmds.cutKey(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", time=(0,end), attribute='translateZ', option="keys" )
 
-    if not selected_objects:
-        cmds.confirmDialog(title="Solver Error!", 
-            message="You need to use the solver on an object!",
-            button="Sorry"
-        )
-        return
-    
-    active_object = selected_objects[0]
-
-    if cmds.objectType(active_object) != "transform" or "MFS_PARTICLE" in active_object or "MFS_DOMAIN" in active_object:
-        cmds.confirmDialog(title="Solver Error!", 
-            message="You need to use the solver on an object!",
-            button="Sorry"
-        )
-        return
-    
-    active_object = selected_objects[0]
-
-    for solver in solvers:
-        if (solver.source_object == active_object):
-            solvers.remove(solver)
-    
-    if (cmds.objExists(f"MFS_PARTICLES_{active_object}")):
-        cmds.delete(f"MFS_PARTICLES_{active_object}")
-    
-    if (cmds.objExists(f"MFS_DOMAIN_{active_object}")):
-        cmds.delete(f"MFS_DOMAIN_{active_object}")
-    
+            cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateX', t=start, v=p.position[0][0])
+            cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', t=start, v=p.position[0][1])
+            cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateZ', t=start, v=p.position[0][2])
 
 def MFS_initializeSolver(pscaleCtrl, domainCtrl, *args):
     selected_objects = cmds.ls(selection=True)
@@ -558,6 +504,39 @@ def MFS_clearSolver(timeCtrl):
         if solver.source_object == active_object:
             solver.clearSim(frameRange[0], frameRange[1])
 
+def MFS_deleteSolver(*args):
+    selected_objects = cmds.ls(selection=True)
+
+    if not selected_objects:
+        cmds.confirmDialog(title="Solver Error!", 
+            message="You need to use the solver on an object!",
+            button="Sorry"
+        )
+        return
+    
+    active_object = selected_objects[0]
+
+    if cmds.objectType(active_object) != "transform" or "MFS_PARTICLE" in active_object or "MFS_DOMAIN" in active_object:
+        cmds.confirmDialog(title="Solver Error!", 
+            message="You need to use the solver on an object!",
+            button="Sorry"
+        )
+        return
+    
+    active_object = selected_objects[0]
+
+    for solver in solvers:
+        if (solver.source_object == active_object):
+            solvers.remove(solver)
+    
+    if (cmds.objExists(f"MFS_PARTICLES_{active_object}")):
+        cmds.delete(f"MFS_PARTICLES_{active_object}")
+    
+    if (cmds.objExists(f"MFS_DOMAIN_{active_object}")):
+        cmds.delete(f"MFS_DOMAIN_{active_object}")
+
+
+# Maths Functions
 
 def wpoly_6(r, h):
     dist = math.sqrt(r[0]**2 + r[1]**2 + r[2]**2)
