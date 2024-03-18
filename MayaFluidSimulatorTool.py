@@ -163,15 +163,13 @@ class MFS_Solver():
         if (not self.solved):
             # TODO: Currently, the first frame seems to take MUCH longer to calculate than the rest, look into why that's the case.
             if (t==0):
+                self.find_neighbors(1)
+
+                self.calc_density_and_pressure(1, h)
+
+                self.calc_forces(t, other_force, viscosity_factor, h)
+
                 for p in self.points:
-                    p.mass = 0.02
-
-                    self.find_neighbors(1)
-
-                    self.calc_density_and_pressure(1, h)
-
-                    self.calc_forces(t, other_force, viscosity_factor, h)
-
                     p.velocity[0] = [
                         ((p.total_force[0] / p.density) + init_vel[0]) * scale, 
                         ((p.total_force[1] / p.density) + init_vel[1]) * scale, 
