@@ -150,13 +150,19 @@ class MFS_Solver():
     def update(self, start, end, other_force, init_vel, viscosity_factor, scale):
         t = (int(cmds.currentTime(query=True)) - start)
 
+        #TODO: Create Maya UI Controls for the settings,
+        #TODO: find the correct initial values.
+        #TODO: fix the algorithm (it doesnt seem to overlap?)
+        #TODO: speedup?
+
         bounding_box = cmds.exactWorldBoundingBox(self.domain_object)
         rest_density = 98
         kfac = 5
-        search_dist = 3 * self.pscale
-        vel_smooth = 0.1
+        search_dist = 7 * self.pscale
+        vel_smooth = 0.2
         floor_damping = 0.3
-        max_vel = 0.1
+        max_vel = 0.2
+        mass = 0.2
 
         # taken from https://nccastaff.bournemouth.ac.uk/jmacey/MastersProject/MSc16/15/thesis.pdf
         # https://eprints.bournemouth.ac.uk/23384/1/2016%20Fluid%20simulation.pdf
@@ -178,7 +184,7 @@ class MFS_Solver():
             else:
                 self.update_position(start, t, scale)
 
-                h = self.find_neighbors(t, search_dist)
+                h = self.find_neighbors(t, search_dist, mass)
 
                 self.calc_density_and_pressure(t, h, rest_density, kfac)
 
@@ -186,13 +192,14 @@ class MFS_Solver():
 
                 self.calc_velocity(bounding_box, t, scale, h, vel_smooth, floor_damping, max_vel)
 
-    def find_neighbors(self, t, search_dist):
+    def find_neighbors(self, t, search_dist, mass):
         # TODO: The current neighbor search is to check points within a certain radius. However hashmaps are much faster. Look into implementing that.
         max_dist = 0
 
         for p in self.points:
             p.neighbor_ids = []
             p.total_force = [0, 0, 0]
+            p.mass = mass
 
             for j in self.points:
                 j_to_p = [
