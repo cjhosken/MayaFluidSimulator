@@ -68,7 +68,7 @@ class MFS_Particle():
         self.id = -1
         self.position = [[0, 0, 0]]
         self.velocity = [[0, 0, 0]]
-        self.mass = 0.02
+        self.mass = 0.001
         self.density = 0
         self.pressure = 0
         self.neighbor_ids = []
@@ -84,7 +84,6 @@ class MFS_Particle():
 
 # GLOBAL VARIABLE
 solvers = []
-
 
 class MFS_Solver():
     points = []
@@ -151,29 +150,26 @@ class MFS_Solver():
     def update(self, start, end, other_force, init_vel, viscosity_factor, scale):
         t = (int(cmds.currentTime(query=True)) - start)
 
-        max_neighbors = 4
-
         bounding_box = cmds.exactWorldBoundingBox(self.domain_object)
+        rest_density = 98
+        kfac = 5
+        search_dist = 3 * self.pscale
+        vel_smooth = 0.1
+        floor_damping = 0.3
+        max_vel = 0.1
 
         # taken from https://nccastaff.bournemouth.ac.uk/jmacey/MastersProject/MSc16/15/thesis.pdf
+        # https://eprints.bournemouth.ac.uk/23384/1/2016%20Fluid%20simulation.pdf
+        # https://nccastaff.bournemouth.ac.uk/jmacey/OldWeb/MastersProjects/MSc15/06Burak/BurakErtekinMScThesis.pdf
 
-        total_particles = self.volume / 4 * math.pi * self.pscale**3 
-        h = math.pow((3 * self.volume * max_neighbors)/(4 * math.pi * total_particles), 1/3) * 2
 
         if (not self.solved):
-            # TODO: Currently, the first frame seems to take MUCH longer to calculate than the rest, look into why that's the case.
             if (t==0):
-                self.find_neighbors(1)
-
-                self.calc_density_and_pressure(1, h)
-
-                self.calc_forces(t, other_force, viscosity_factor, h)
-
                 for p in self.points:
                     p.velocity[0] = [
-                        ((p.total_force[0] / p.density) + init_vel[0]) * scale, 
-                        ((p.total_force[1] / p.density) + init_vel[1]) * scale, 
-                        ((p.total_force[2] / p.density) + init_vel[2]) * scale
+                        init_vel[0] * scale, 
+                        init_vel[1] * scale, 
+                        init_vel[2] * scale
                     ]
 
                     cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateX', t=t+start, v=p.position[0][0])
@@ -182,17 +178,17 @@ class MFS_Solver():
             else:
                 self.update_position(start, t, scale)
 
-                self.find_neighbors(t)
+                h = self.find_neighbors(t, search_dist)
 
-                self.calc_density_and_pressure(t, h)
+                self.calc_density_and_pressure(t, h, rest_density, kfac)
 
                 self.calc_forces(t, other_force, viscosity_factor, h)
 
-                self.calc_velocity(bounding_box, t, scale, h)
+                self.calc_velocity(bounding_box, t, scale, h, vel_smooth, floor_damping, max_vel)
 
-    def find_neighbors(self, t):
+    def find_neighbors(self, t, search_dist):
         # TODO: The current neighbor search is to check points within a certain radius. However hashmaps are much faster. Look into implementing that.
-        search_dist = 3 * self.pscale
+        max_dist = 0
 
         for p in self.points:
             p.neighbor_ids = []
@@ -206,14 +202,15 @@ class MFS_Solver():
                     ]
                 
                 dist = math.sqrt(j_to_p[0]**2 + j_to_p[1]**2 + j_to_p[2]**2)
+                max_dist = max(dist, max_dist)
 
                 if (dist < search_dist):
                     p.neighbor_ids.append(j.id)
+            
+        return max_dist
 
 
-    def calc_density_and_pressure(self, t, h):
-        rest_density = 998.2
-        kfac = 0.2
+    def calc_density_and_pressure(self, t, h, rest_density, kfac):
 
         for p in self.points:
             p.density = rest_density
@@ -245,13 +242,12 @@ class MFS_Solver():
                         p.position[t-1][2] - j.position[t-1][2]
                     ]
 
-                    pressure_term = (j.pressure + p.pressure)/2  * (j.mass / j.density)
-                    smoothing = wspiky_grad(j_to_p, h)
+                    pressure_term = wpoly_6_grad(j_to_p, h)
 
-                    pressure_force[0] -= pressure_term * smoothing[0]
-                    pressure_force[1] -= pressure_term * smoothing[1]
-                    pressure_force[2] -= pressure_term * smoothing[2]
-
+                    pressure_force[0] += pressure_term[0]
+                    pressure_force[1] += pressure_term[1]
+                    pressure_force[2] += pressure_term[2]
+                
                     velocity_diff = [
                         j.velocity[t-1][0] - p.velocity[t-1][0],
                         j.velocity[t-1][1] - p.velocity[t-1][1],
@@ -259,20 +255,26 @@ class MFS_Solver():
                     ]
 
                     viscosity_term = j.mass / j.density
-                    viscosity_smoothing = wvisc_lap(velocity_diff, h)
+                    viscosity_smoothing = wvisc_lap(j_to_p, h)
 
                     viscosity_force[0] += velocity_diff[0] * viscosity_term * viscosity_smoothing
                     viscosity_force[1] += velocity_diff[1] * viscosity_term * viscosity_smoothing
                     viscosity_force[2] += velocity_diff[2] * viscosity_term * viscosity_smoothing
+
+            pressure_const = -(p.mass / p.density)
+
+            pressure_force[0] *= pressure_const
+            pressure_force[1] *= pressure_const
+            pressure_force[2] *= pressure_const
 
             viscosity_force[0] *= viscosity_factor
             viscosity_force[1] *= viscosity_factor
             viscosity_force[2] *= viscosity_factor
 
             external_force = [
-                other_force[0] * p.density, 
-                other_force[1] * p.density, 
-                other_force[2] * p.density
+                other_force[0] * p.mass, 
+                other_force[1] * p.mass, 
+                other_force[2] * p.mass
             ]
 
             p.total_force = [
@@ -281,15 +283,15 @@ class MFS_Solver():
                 pressure_force[2] + viscosity_force[2] + external_force[2]
             ]
         
-    def calc_velocity(self, bbox, t, scale, h):
+    def calc_velocity(self, bbox, t, scale, h, vel_smooth, floor_damping, max_vel):
         min_point = om.MPoint(bbox[0], bbox[1], bbox[2])
         max_point = om.MPoint(bbox[3], bbox[4], bbox[5])
 
         for p in self.points:
             p.velocity.append([
-                p.velocity[t-1][0] + (p.total_force[0] / p.density) * scale, 
-                p.velocity[t-1][1] + (p.total_force[1] / p.density) * scale, 
-                p.velocity[t-1][2] + (p.total_force[2] / p.density) * scale
+                p.velocity[t-1][0] + (p.total_force[0] / p.mass) * scale, 
+                p.velocity[t-1][1] + (p.total_force[1] / p.mass) * scale, 
+                p.velocity[t-1][2] + (p.total_force[2] / p.mass) * scale
             ])
 
             xsph_term = 0
@@ -303,7 +305,6 @@ class MFS_Solver():
 
                 xsph_term += ((2 * j.mass) / (p.density + j.density)) * wpoly_6(j_to_p, h)
             
-            vel_smooth = 0.1
 
             p.velocity[t] = [
                 p.velocity[t][0] + vel_smooth * xsph_term,
@@ -317,8 +318,6 @@ class MFS_Solver():
                 p.position[t-1][2] + p.velocity[t][2] * scale
             ]
 
-            floor_damping = 0.3
-
             if (advected[0] < min_point[0] or advected[0] > max_point[0]):
                 p.velocity[t][0] = -p.velocity[t][0]
 
@@ -327,6 +326,15 @@ class MFS_Solver():
                                 
             if (advected[2] < min_point[2] or advected[2] > max_point[2]):
                 p.velocity[t][2] = -p.velocity[t][2]
+            
+            #if (math.sqrt(p.velocity[t][0]**2) < max_vel):
+            #    p.velocity[t][0] = 0
+            
+            #if (math.sqrt(p.velocity[t][1]**2) < max_vel):
+            #    p.velocity[t][1] = 0
+            
+            #if (math.sqrt(p.velocity[t][2]**2) < max_vel):
+            #    p.velocity[t][2] = 0
 
     def update_position(self, start, t, scale):
         for p in self.points:
@@ -550,27 +558,48 @@ def wpoly_6_grad(r, h):
 
     end = (h**2 - dist**2)**2
 
-    return [
-        constant * r[0] * end,
-        constant * r[1] * end,
-        constant * r[2] * end
-    ]
+    if (dist <= h):
+        return [
+            constant * r[0] * end,
+            constant * r[1] * end,
+            constant * r[2] * end
+        ]
+    else:
+        return [0, 0, 0]
+
+def wpoly_6_lap(r, h):
+    constant = (-945/(32*math.pi*h**9)) 
+    dist = math.sqrt(r[0]**2 + r[1]**2 + r[2]**2)
+
+    term_a = (h**2 - dist**2)
+    term_b = (3*h**2 - 7*dist**2)
+
+    if (dist <= h):
+        return constant * term_a * term_b
+    else:
+        return 0
 
 def wspiky_grad(r, h):
     dist = math.sqrt(r[0]**2 + r[1]**2 + r[2]**2)
-    const = -45/(math.pi * h**6) * (h-dist)**2
-    if (dist == 0):
+    const = -45/(math.pi * h**6)
+    term_b =  (h-dist)**2
+    if (dist <= h):
+        return [
+        const * (r[0]/dist) * term_b,
+        const * (r[1]/dist) * term_b,
+        const * (r[2]/dist) * term_b
+        ]
+    else:
         return [0, 0, 0]
-        
-    return [
-        const * r[0]/dist,
-        const * r[1]/dist,
-        const * r[2]/dist
-    ]
 
 def wvisc_lap(r, h):
     dist = math.sqrt(r[0]**2 + r[1]**2 + r[2]**2)
-    return 45/(math.pi*h**6) * (h-dist)
+    constant = 45/(math.pi*h**6) 
+    term_a = (h-dist)
+    if (dist <= h):
+        return constant * term_a
+    else:
+        return 0
 
 def divergence(r):
     return 
