@@ -21,20 +21,26 @@ def MFS_popup(*args):
 
     project_path = cmds.workspace(query=True, rootDirectory=True)
 
-    cmds.window(title="Maya Fluid Simulator", widthHeight=(500, 500))
+    cmds.window(title="Maya Fluid Simulator", widthHeight=(500, 600))
     col = cmds.columnLayout(adjustableColumn=True)
 
-    image = cmds.image(width=300, height=150, image=os.path.join(project_path, "icons/MFS_banner.png"))
-    
+    cmds.image(width=300, height=150, image=os.path.join(project_path, "icons/MFS_banner.png"))
+
+    initialize_section = cmds.frameLayout(label='Initialize', collapsable=True, collapse=False, parent=col)
+
+    cmds.columnLayout(adjustableColumn=True, parent=initialize_section)
+
     pscaleCtrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=0.25, field=True, label="Particle Scale")
     domainCtrl = cmds.checkBox(label="Keep Domain", value=True)
     
-    cmds.rowLayout(numberOfColumns=2)
-
+    init_row = cmds.rowLayout(numberOfColumns=2, parent=initialize_section, adjustableColumn=True)
     cmds.button(label="Initialize", command=lambda *args:MFS_initializeSolver(pscaleCtrl, domainCtrl))
     cmds.button(label="X", command=lambda *args:MFS_deleteSolver())
+    cmds.rowLayout(init_row, edit=True, columnWidth=[(1, 450), (2, 50)])
 
-    cmds.columnLayout(adjustableColumn=True, parent=col)
+    simulate_section = cmds.frameLayout(label='Simulate', collapsable=True, collapse=False, parent=col)
+
+    cmds.columnLayout(adjustableColumn=True, parent=simulate_section)
 
     # gravity
     forceCtrl = cmds.floatFieldGrp( numberOfFields=3, label='Force', extraLabel='cm', value1=0, value2=-9.8, value3=0 )
@@ -45,13 +51,14 @@ def MFS_popup(*args):
     # velocity
     velCtrl = cmds.floatFieldGrp( numberOfFields=3, label='Initial Velocity', extraLabel='cm', value1=0, value2=0, value3=0 )
     
+    
     cmds.rowLayout(numberOfColumns=3)
     timeCtrl = cmds.intFieldGrp(numberOfFields=2, value1=1, value2=120, label="Frame Range")
     tsCtrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.1, field=True, label="Time Scale")
 
-    collapsible_section = cmds.frameLayout(label='Advanced Settings', collapsable=True, collapse=True, parent=col)
+    advanced_section = cmds.frameLayout(label='Advanced', collapsable=True, collapse=False, parent=col)
 
-    cmds.columnLayout(adjustableColumn=True, parent=collapsible_section)
+    cmds.columnLayout(adjustableColumn=True, parent=advanced_section)
 
     densityCtrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=99.8, field=True, label="Rest Density")
     kFacCtrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=5, field=True, label="K Factor")
@@ -61,11 +68,12 @@ def MFS_popup(*args):
     minVelCtrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.2, field=True, label="Minimum Velocity")
     massCtrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.2, field=True, label="Particle Mass")
 
-    cmds.columnLayout(adjustableColumn=True, parent=col)
-
-    cmds.rowLayout(numberOfColumns=2)
+    solve_row = cmds.rowLayout(numberOfColumns=2, parent=simulate_section, adjustableColumn = True)
     cmds.button(label="Solve", command=lambda *args:MFS_runSolver(timeCtrl, forceCtrl, viscCtrl, velCtrl, tsCtrl, densityCtrl, kFacCtrl, searchCtrl, smoothCtrl, dampCtrl, minVelCtrl, massCtrl))
     cmds.button(label="X", command=lambda *args:MFS_clearSolver(timeCtrl))
+    cmds.rowLayout(solve_row, edit=True, columnWidth=[(1, 450), (2, 50)])
+
+    cmds.columnLayout(adjustableColumn=True, parent=col)
         
     cmds.showWindow()
 
