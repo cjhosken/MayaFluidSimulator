@@ -46,11 +46,10 @@ def MFS_popup(*args):
     forceCtrl = cmds.floatFieldGrp( numberOfFields=3, label='Force', extraLabel='cm', value1=0, value2=-9.8, value3=0 )
 
     # viscosity
-    viscCtrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=0.1, field=True, label="Viscosity")
+    viscCtrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=0, field=True, label="Viscosity")
 
     # velocity
     velCtrl = cmds.floatFieldGrp( numberOfFields=3, label='Initial Velocity', extraLabel='cm', value1=0, value2=0, value3=0 )
-    
     
     cmds.rowLayout(numberOfColumns=3)
     timeCtrl = cmds.intFieldGrp(numberOfFields=2, value1=1, value2=120, label="Frame Range")
@@ -60,13 +59,13 @@ def MFS_popup(*args):
 
     cmds.columnLayout(adjustableColumn=True, parent=advanced_section)
 
-    densityCtrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=99.8, field=True, label="Rest Density")
-    kFacCtrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=5, field=True, label="K Factor")
+    densityCtrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=4.8, maxValue=10000, field=True, label="Rest Density")
+    kFacCtrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=10, field=True, label="K Factor")
     searchCtrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=7, field=True, label="Search Distance")
-    smoothCtrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.2, field=True, label="Velocity Smoothing")
-    dampCtrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.3, field=True, label="Floor Damping")
-    minVelCtrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.2, field=True, label="Minimum Velocity")
-    massCtrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.2, field=True, label="Particle Mass")
+    smoothCtrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0, field=True, label="Velocity Smoothing")
+    dampCtrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.01, field=True, label="Floor Damping")
+    minVelCtrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.1, field=True, label="Minimum Velocity")
+    massCtrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.001, field=True, label="Particle Mass")
 
     solve_row = cmds.rowLayout(numberOfColumns=2, parent=simulate_section, adjustableColumn = True)
     cmds.button(label="Solve", command=lambda *args:MFS_runSolver(timeCtrl, forceCtrl, viscCtrl, velCtrl, tsCtrl, densityCtrl, kFacCtrl, searchCtrl, smoothCtrl, dampCtrl, minVelCtrl, massCtrl))
@@ -198,7 +197,7 @@ class MFS_Solver():
                     cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', t=t+start, v=p.position[0][1])
                     cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateZ', t=t+start, v=p.position[0][2])
             else:
-                self.update_position(start, t, scale)
+                self.update_position(start, t, scale, bounding_box)
 
                 h = self.find_neighbors(t, search_dist, mass)
 
@@ -219,16 +218,16 @@ class MFS_Solver():
 
             for j in self.points:
                 j_to_p = [
-                        p.position[t-1][0] - j.position[t-1][0],
-                        p.position[t-1][1] - j.position[t-1][1],
-                        p.position[t-1][2] - j.position[t-1][2]
+                        p.position[t][0] - j.position[t][0],
+                        p.position[t][1] - j.position[t][1],
+                        p.position[t][2] - j.position[t][2]
                     ]
                 
                 dist = math.sqrt(j_to_p[0]**2 + j_to_p[1]**2 + j_to_p[2]**2)
-                max_dist = max(dist, max_dist)
 
                 if (dist < search_dist):
                     p.neighbor_ids.append(j.id)
+                    max_dist = max(dist, max_dist)
             
         return max_dist
 
@@ -242,9 +241,9 @@ class MFS_Solver():
                 if (j.id in p.neighbor_ids):
                     
                     j_to_p = [
-                        p.position[t-1][0] - j.position[t-1][0],
-                        p.position[t-1][1] - j.position[t-1][1],
-                        p.position[t-1][2] - j.position[t-1][2]
+                        p.position[t][0] - j.position[t][0],
+                        p.position[t][1] - j.position[t][1],
+                        p.position[t][2] - j.position[t][2]
                     ]
 
                     p.density += j.mass * wpoly_6(j_to_p, h)
@@ -260,9 +259,9 @@ class MFS_Solver():
             for j in self.points:
                 if (j.id in p.neighbor_ids and j.id != p.id):
                     j_to_p = [
-                        p.position[t-1][0] - j.position[t-1][0],
-                        p.position[t-1][1] - j.position[t-1][1],
-                        p.position[t-1][2] - j.position[t-1][2]
+                        p.position[t][0] - j.position[t][0],
+                        p.position[t][1] - j.position[t][1],
+                        p.position[t][2] - j.position[t][2]
                     ]
 
                     pressure_term = wpoly_6_grad(j_to_p, h)
@@ -321,9 +320,9 @@ class MFS_Solver():
 
             for j in self.points:
                 j_to_p = [
-                    p.position[t-1][0] - j.position[t-1][0],
-                    p.position[t-1][1] - j.position[t-1][1],
-                    p.position[t-1][2] - j.position[t-1][2]
+                    p.position[t][0] - j.position[t][0],
+                    p.position[t][1] - j.position[t][1],
+                    p.position[t][2] - j.position[t][2]
                 ]
 
                 xsph_term += ((2 * j.mass) / (p.density + j.density)) * wpoly_6(j_to_p, h)
@@ -336,32 +335,29 @@ class MFS_Solver():
             ]
 
             advected = [
-                p.position[t-1][0] + p.velocity[t][0] * scale,
-                p.position[t-1][1] + p.velocity[t][1] * scale,
-                p.position[t-1][2] + p.velocity[t][2] * scale
+                p.position[t][0] + p.velocity[t][0] * scale,
+                p.position[t][1] + p.velocity[t][1] * scale,
+                p.position[t][2] + p.velocity[t][2] * scale
             ]
 
             if (advected[0] < min_point[0] or advected[0] > max_point[0]):
-                p.velocity[t][0] = -p.velocity[t][0]
+                p.velocity[t][0] = -p.velocity[t][0] 
 
-            if (advected[1] < min_point[1] or advected[1] > max_point[1]):
+            if (advected[1] < min_point[1]):
                 p.velocity[t][1] = -p.velocity[t][1] * floor_damping
+
+            if (advected[1] > max_point[1]):
+                p.velocity[t][1] = -p.velocity[t][1]
                                 
             if (advected[2] < min_point[2] or advected[2] > max_point[2]):
                 p.velocity[t][2] = -p.velocity[t][2]
-            
-            if (math.sqrt(p.velocity[t][0]**2) < max_vel):
-                p.velocity[t][0] = 0
-            
-            if (math.sqrt(p.velocity[t][1]**2) < max_vel):
-                p.velocity[t][1] = 0
-            
-            if (math.sqrt(p.velocity[t][2]**2) < max_vel):
-                p.velocity[t][2] = 0
+        
 
-    def update_position(self, start, t, scale):
+    def update_position(self, start, t, scale, bbox):
+        min_point = om.MPoint(bbox[0], bbox[1], bbox[2])
+        max_point = om.MPoint(bbox[3], bbox[4], bbox[5])
+        
         for p in self.points:
-
             p.position.append(
                 [
                     p.position[t-1][0] + p.velocity[t-1][0] * scale,
