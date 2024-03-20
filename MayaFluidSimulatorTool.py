@@ -49,10 +49,22 @@ def MFS_popup(*args):
     timeCtrl = cmds.intFieldGrp(numberOfFields=2, value1=1, value2=120, label="Frame Range")
     tsCtrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.1, field=True, label="Time Scale")
 
+    collapsible_section = cmds.frameLayout(label='Advanced Settings', collapsable=True, collapse=True, parent=col)
+
+    cmds.columnLayout(adjustableColumn=True, parent=collapsible_section)
+
+    densityCtrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=99.8, field=True, label="Rest Density")
+    kFacCtrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=5, field=True, label="K Factor")
+    searchCtrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=7, field=True, label="Search Distance")
+    smoothCtrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.2, field=True, label="Velocity Smoothing")
+    dampCtrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.3, field=True, label="Floor Damping")
+    minVelCtrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.2, field=True, label="Minimum Velocity")
+    massCtrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.2, field=True, label="Particle Mass")
+
     cmds.columnLayout(adjustableColumn=True, parent=col)
 
     cmds.rowLayout(numberOfColumns=2)
-    cmds.button(label="Solve", command=lambda *args:MFS_runSolver(timeCtrl, forceCtrl, viscCtrl, velCtrl, tsCtrl))
+    cmds.button(label="Solve", command=lambda *args:MFS_runSolver(timeCtrl, forceCtrl, viscCtrl, velCtrl, tsCtrl, densityCtrl, kFacCtrl, searchCtrl, smoothCtrl, dampCtrl, minVelCtrl, massCtrl))
     cmds.button(label="X", command=lambda *args:MFS_clearSolver(timeCtrl))
         
     cmds.showWindow()
@@ -147,22 +159,18 @@ class MFS_Solver():
         self.volume = (max_point[0] - min_point[0]) * (max_point[1] - min_point[1]) * (max_point[2] - min_point[2])
         cmds.progressWindow(endProgress=1)
 
-    def update(self, start, end, other_force, init_vel, viscosity_factor, scale):
+    def update(self, start, end, other_force, init_vel, viscosity_factor, scale, rest_density, kfac, search_dist, vel_smooth, floor_damping, max_vel, mass):
         t = (int(cmds.currentTime(query=True)) - start)
 
-        #TODO: Create Maya UI Controls for the settings,
         #TODO: find the correct initial values.
         #TODO: fix the algorithm (it doesnt seem to overlap?)
         #TODO: speedup?
 
         bounding_box = cmds.exactWorldBoundingBox(self.domain_object)
-        rest_density = 98
-        kfac = 5
-        search_dist = 7 * self.pscale
-        vel_smooth = 0.2
-        floor_damping = 0.3
-        max_vel = 0.2
-        mass = 0.2
+
+        # might need to do this?
+        search_dist *= self.pscale
+
 
         # taken from https://nccastaff.bournemouth.ac.uk/jmacey/MastersProject/MSc16/15/thesis.pdf
         # https://eprints.bournemouth.ac.uk/23384/1/2016%20Fluid%20simulation.pdf
@@ -334,14 +342,14 @@ class MFS_Solver():
             if (advected[2] < min_point[2] or advected[2] > max_point[2]):
                 p.velocity[t][2] = -p.velocity[t][2]
             
-            #if (math.sqrt(p.velocity[t][0]**2) < max_vel):
-            #    p.velocity[t][0] = 0
+            if (math.sqrt(p.velocity[t][0]**2) < max_vel):
+                p.velocity[t][0] = 0
             
-            #if (math.sqrt(p.velocity[t][1]**2) < max_vel):
-            #    p.velocity[t][1] = 0
+            if (math.sqrt(p.velocity[t][1]**2) < max_vel):
+                p.velocity[t][1] = 0
             
-            #if (math.sqrt(p.velocity[t][2]**2) < max_vel):
-            #    p.velocity[t][2] = 0
+            if (math.sqrt(p.velocity[t][2]**2) < max_vel):
+                p.velocity[t][2] = 0
 
     def update_position(self, start, t, scale):
         for p in self.points:
@@ -382,9 +390,9 @@ class MFS_Solver():
                 p.position[0]
             ]
 
-            cmds.cutKey(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", time=(0,end), attribute='translateX', option="keys" )
-            cmds.cutKey(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", time=(0,end), attribute='translateY', option="keys" )
-            cmds.cutKey(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", time=(0,end), attribute='translateZ', option="keys" )
+            cmds.cutKey(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateX', clear=True)
+            cmds.cutKey(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', clear=True )
+            cmds.cutKey(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateZ', clear=True )
 
             cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateX', t=start, v=p.position[0][0])
             cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', t=start, v=p.position[0][1])
@@ -452,13 +460,20 @@ def MFS_initializeSolver(pscaleCtrl, domainCtrl, *args):
     cmds.select(solver.source_object)
 
 
-def MFS_runSolver(timeCtrl, forceCtrl, viscCtrl, velCtrl, tsCtrl, *args):
+def MFS_runSolver(timeCtrl, forceCtrl, viscCtrl, velCtrl, tsCtrl, densityCtrl, kFacCtrl, searchCtrl, smoothCtrl, dampCtrl, minVelCtrl, massCtrl, *args):
     selected_objects = cmds.ls(selection=True)
     frameRange = cmds.intFieldGrp(timeCtrl, query=True, value=True)
     force = cmds.floatFieldGrp(forceCtrl, query=True, value=True)
     scale = cmds.floatSliderGrp(tsCtrl, query=True, value=True)
     viscosity = cmds.floatSliderGrp(viscCtrl, query=True, value=True)
     velocity = cmds.floatFieldGrp(velCtrl, query=True, value=True)
+    rest_density = cmds.floatSliderGrp(densityCtrl, query=True, value=True)
+    kfac = cmds.floatSliderGrp(kFacCtrl, query=True, value=True)
+    search_dist = cmds.floatSliderGrp(searchCtrl, query=True, value=True)
+    vel_smooth = cmds.floatSliderGrp(smoothCtrl, query=True, value=True)
+    floor_damping = cmds.floatSliderGrp(dampCtrl, query=True, value=True)
+    min_vel = cmds.floatSliderGrp(minVelCtrl, query=True, value=True)
+    mass = cmds.floatSliderGrp(massCtrl, query=True, value=True)
 
     if not selected_objects:
         cmds.confirmDialog(title="Solver Error!", 
@@ -481,11 +496,12 @@ def MFS_runSolver(timeCtrl, forceCtrl, viscCtrl, velCtrl, tsCtrl, *args):
     for solver in solvers:
         if solver.source_object == active_object:
             index = solvers.index(solver)
+            solver.clearSim(frameRange[0], frameRange[1])
             solver.solved = False
             cmds.progressWindow(title='Simulating', progress=0, status='Progress: 0%', isInterruptable=True, maxValue=(frameRange[1]-frameRange[0]))
-            MFS_solve(index, 0, frameRange[0], frameRange[1], force, velocity, viscosity, scale)
+            MFS_solve(index, 0, frameRange[0], frameRange[1], force, velocity, viscosity, scale, rest_density, kfac, search_dist, vel_smooth, floor_damping, min_vel, mass)
 
-def MFS_solve(index, progress, start, end, force, velocity, viscosity, scale):        
+def MFS_solve(index, progress, start, end, force, velocity, viscosity, scale, rest_density, kfac, search_dist, vel_smooth, floor_damping, min_vel, mass):        
     solver = solvers[index]
 
     t = int(cmds.currentTime(query=True))
@@ -500,12 +516,12 @@ def MFS_solve(index, progress, start, end, force, velocity, viscosity, scale):
         solver.solved = True
         return
     
-    solver.update(start, end, force, velocity, viscosity, scale)
+    solver.update(start, end, force, velocity, viscosity, scale, rest_density, kfac, search_dist, vel_smooth, floor_damping, min_vel, mass)
     progress += 1
 
     cmds.progressWindow(e=1, progress=progress, status=f'Progress: {progress}%')
     cmds.currentTime(t + 1, edit=True)
-    MFS_solve(index, progress, start, end, force, velocity, viscosity, scale)
+    MFS_solve(index, progress, start, end, force, velocity, viscosity, scale, rest_density, kfac, search_dist, vel_smooth, floor_damping, min_vel, mass)
 
 def MFS_clearSolver(timeCtrl):
     selected_objects = cmds.ls(selection=True)
