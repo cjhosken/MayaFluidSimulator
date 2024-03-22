@@ -251,11 +251,11 @@ class MFS_Solver():
             p.pressure = kfac * p.density
 
     def calc_forces(self, t, other_force, viscosity_factor, h):
-        pressure_force = [0, 0, 0]
-        viscosity_force = [0, 0, 0]
-        external_force = [0, 0, 0]
-
         for p in self.points:
+            pressure_force = [0, 0, 0]
+            viscosity_force = [0, 0, 0]
+            external_force = [0, 0, 0]
+
             for j in self.points:
                 if (j.id in p.neighbor_ids and j.id != p.id):
                     j_to_p = [
@@ -264,11 +264,12 @@ class MFS_Solver():
                         p.position[t][2] - j.position[t][2]
                     ]
 
-                    pressure_term = wpoly_6_grad(j_to_p, h)
+                    pressure_term = wspiky_grad(j_to_p, h)
+                    pressure_const = (j.pressure + p.pressure)/2*(j.mass / j.density)
 
-                    pressure_force[0] += pressure_term[0]
-                    pressure_force[1] += pressure_term[1]
-                    pressure_force[2] += pressure_term[2]
+                    pressure_force[0] += pressure_const * pressure_term[0]
+                    pressure_force[1] += pressure_const * pressure_term[1]
+                    pressure_force[2] += pressure_const * pressure_term[2]
                 
                     velocity_diff = [
                         j.velocity[t-1][0] - p.velocity[t-1][0],
@@ -283,11 +284,10 @@ class MFS_Solver():
                     viscosity_force[1] += velocity_diff[1] * viscosity_term * viscosity_smoothing
                     viscosity_force[2] += velocity_diff[2] * viscosity_term * viscosity_smoothing
 
-            pressure_const = -(p.mass / p.density)
 
-            pressure_force[0] *= pressure_const
-            pressure_force[1] *= pressure_const
-            pressure_force[2] *= pressure_const
+            pressure_force[0] *= -1
+            pressure_force[1] *= -1
+            pressure_force[2] *= -1
 
             viscosity_force[0] *= viscosity_factor
             viscosity_force[1] *= viscosity_factor

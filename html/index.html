@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Particle Grid Simulation</title>
+<style>
+    body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    canvas {
+        border: 1px solid black;
+    }
+</style>
+</head>
+<body>
+<canvas id="particleCanvas" width="500" height="500"></canvas>
+
+<script>
+    var GRID_SIZE = 20;
+    var PSCALE = 10;
+    var KFAC = 500000;
+    var MASS = 1;
+    var SEARCH = 2 * PSCALE;
+    var DENSITY = 998;
+    var GRAVITY = 9.8;
+    var TSCALE = 0.1;
+    var VISCFAC = 50000000;
+    var FLOOR_DAMP = 0.1
+    var SMOOTHING_FAC = 0.1
+
+    function HSVtoRGB(h, s, v) {
+            let c = v * s;
+            let hp = (h / 60) % 6;
+            let x = c * (1 - Math.abs(hp % 2 - 1));
+            let rgb = [0, 0, 0];
+            
+            if (0 <= hp && hp < 1) {
+                rgb = [c, x, 0];
+            } else if (1 <= hp && hp < 2) {
+                rgb = [x, c, 0];
+            } else if (2 <= hp && hp < 3) {
+                rgb = [0, c, x];
+            } else if (3 <= hp && hp < 4) {
+                rgb = [0, x, c];
+            } else if (4 <= hp && hp < 5) {
+                rgb = [x, 0, c];
+            } else if (5 <= hp && hp < 6) {
+                rgb = [c, 0, x];
+            }
+            
+            let m = v - c;
+            rgb[0] += m;
+            rgb[1] += m;
+            rgb[2] += m;
+            
+        // Scale RGB values to the range [0, 255]
+        return rgb.map(val => Math.round(val * 255));
+    }
+
+    class Particle {
+        constructor(x, y, size, id, ctx) {
+            this.id = -1;
+            this.position = [x, y];
+            this.size = size;
+            this.ctx = ctx;
+            this.velocity = [10, 0.0];
+            this.id = id;
+            this.pressure = 0;
+            this.density = 0;
+            this.mass = 0;
+            this.neighbors = []
+            this.force = [0.0, 0.0]
+        }
+
+        draw() {
+            this.ctx.beginPath();
+            this.ctx.arc(this.position[0], this.position[1], this.size / 2, 0, Math.PI * 2);
+
+            var speed = Math.sqrt(this.velocity[0] * this.velocity[0] + this.velocity[1] * this.velocity[1])
+
+            speed /= 35
+
+            let rgbColor = HSVtoRGB(200, 1/speed, Math.max(speed, 0.3));
+
+            this.ctx.fillStyle = `rgb(${rgbColor[0]}, ${rgbColor[1]}, ${rgbColor[2]})`;
+            this.ctx.fill();
+            this.ctx.stroke();
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        const canvas = document.getElementById('particleCanvas');
+        const ctx = canvas.getContext('2d');
+
+
+        let particles = new Array(GRID_SIZE).fill(null).map(() => new Array(GRID_SIZE).fill(null));
+
+        var id = 0;
+
+        for (let i = 0; i < GRID_SIZE; i++) {
+            for (let j = 0; j < GRID_SIZE; j++) {
+        
+                particles[i][j] = new Particle(
+                    (i + 0.5) * PSCALE + canvas.width / 2 - GRID_SIZE * PSCALE / 2,
+                    (j + 0.5) * PSCALE + GRID_SIZE,
+                    PSCALE,
+                    id,
+                    ctx
+                );
+                id+=1;
+            }
+        }
+
+        function drawGrid() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            particles.forEach(row => {
+                row.forEach(particle => {
+                    particle.draw();
+                });
+            });
+        }
+
+        function update() {
+            update_position()
+            h = find_neighbors()
+            calc_density_and_pressure(h)
+            calc_forces(h)
+            calc_velocity()
+        }
+
+        function find_neighbors() {
+            var max_dist = 0;
+            particles.forEach(row => {
+                row.forEach(particle => {
+                    particle.neighbors = []
+                    particle.force = [0, 0, 0]
+                    particle.mass = MASS;
+
+                    particles.forEach(jow => {
+                        jow.forEach(jarticle=> {
+                            var j_to_p = [
+                                particle.position[0] - jarticle.position[0],
+                                particle.position[1] - jarticle.position[1]
+                            ]
+
+                            var dist = Math.sqrt(j_to_p[0]*j_to_p[0] + j_to_p[1]*j_to_p[1]);
+
+                            if (dist <= SEARCH) {
+                                particle.neighbors.push(jarticle.id)
+                                max_dist = Math.max(dist, max_dist)
+                            }
+                        })
+                    })
+                });
+            });
+
+            return max_dist;
+        }
+
+        function calc_density_and_pressure(h) {
+            particles.forEach(row => {
+                row.forEach(particle => {
+
+                    particle.density = DENSITY
+                    particle.force = [0.0, 0.0]
+                    particle.mass = MASS
+
+                    particles.forEach(jow => {
+                        jow.forEach(jarticle=> {
+                            if (jarticle.id in particle.neighbors) {
+                                var j_to_p = [
+                                    particle.position[0] - jarticle.position[0],
+                                    particle.position[1] - jarticle.position[1]
+                                ]
+
+                                particle.density += jarticle.mass * wpoly_6(j_to_p, h);
+                            }
+                        })
+
+                    })
+                    particle.pressure = KFAC * particle.density;
+                });
+            });
+        }
+
+        function calc_forces(h) {
+            particles.forEach(row => {
+                row.forEach(particle => {
+                    var external_force = [
+                        0.0, GRAVITY
+                    ];
+                    var pressure_force = [0.0, 0.0];
+                    var visc_force = [0.0, 0.0];
+
+                    particles.forEach(jow => {
+                        jow.forEach(jarticle=> {
+                            if (particle.neighbors.includes(jarticle.id) && jarticle.id != particle.id) {
+                                var j_to_p = [
+                                    particle.position[0] - jarticle.position[0],
+                                    particle.position[1] - jarticle.position[1]
+                                ];
+
+                                pressure_term = wspiky_grad(j_to_p, h);
+                                pressure_const = (particle.pressure + jarticle.pressure)/2 * (particle.mass / particle.density);
+
+                                pressure_force[0] += pressure_const * pressure_term[0],
+                                pressure_force[1] += pressure_const * pressure_term[1]
+
+                                velocity_diff = [
+                                    jarticle.velocity[0] - particle.velocity[0],
+                                    jarticle.velocity[1] - particle.velocity[1],
+                                ];
+
+                                visc_term = jarticle.mass / jarticle.density;
+                                visc_smooth = wvisc_lap(j_to_p, h);
+
+                                visc_force[0] += velocity_diff[0] * visc_term * visc_smooth;
+                                visc_force[1] += velocity_diff[1] * visc_term * visc_smooth;
+                            }
+                        })
+                    })
+
+
+                    pressure_force[0] *= -1,
+                    pressure_force[1] *= -1,
+
+                    visc_force[0] *= VISCFAC;
+                    visc_force[1] *= VISCFAC;
+
+                    external_force[0] *= particle.mass,
+                    external_force[1] *= particle.mass
+
+                    particle.force = [
+                        pressure_force[0] + visc_force[0] + external_force[0],
+                        pressure_force[1] + visc_force[1] + external_force[1]
+                    ];
+
+                    //console.log("FORCE: [%f, %f]", particle.force[0], particle.force[1]);
+                });
+            });
+        }
+
+        function calc_velocity() {
+            particles.forEach(row => {
+                row.forEach(particle => {
+                    
+                    particle.velocity[0] += (particle.force[0] / particle.mass) * TSCALE
+                    particle.velocity[1] += (particle.force[1] / particle.mass) * TSCALE
+
+
+                    if (particle.position[1] + particle.velocity[1] * TSCALE > canvas.height) {
+                        
+                        particle.velocity[1] = particle.velocity[1] * -(FLOOR_DAMP);
+                    }
+
+                    if (particle.position[0] + particle.velocity[0] * TSCALE > canvas.width 
+                        || particle.position[0] + particle.velocity[0] * TSCALE < 0
+                    ) {
+                        particle.velocity[0] *= -1;
+                    }
+
+                    if (particle.position[1] + particle.velocity[1] * TSCALE < 0
+                    ) {
+                        particle.velocity[1] *= -1;
+                    }
+
+                    var xsph_term = 0
+
+                    particles.forEach(jow => {
+                        jow.forEach(jarticle=> {
+                        j_to_p = [
+                            particle.position[0] - jarticle.position[0],
+                            particle.position[1] - jarticle.position[1],
+                        ]
+
+                        xsph_term += ((2 * jarticle.mass) / (particle.density + jarticle.density)) * wpoly_6(j_to_p, h)
+                        });
+                    });
+
+                    particle.velocity[0] += xsph_term * SMOOTHING_FAC;
+                    particle.velocity[1] += xsph_term * SMOOTHING_FAC;
+                });
+            });
+        }
+
+        function update_position() {
+            particles.forEach(row => {
+                row.forEach(particle => {
+                    particle.position[0] += particle.velocity[0] * TSCALE;
+                    particle.position[1] += particle.velocity[1] * TSCALE;
+                });
+            });
+        }
+
+        function animate() {
+            update();
+            drawGrid();
+            requestAnimationFrame(animate);
+        }
+
+        function wpoly_6(r, h) {
+            dist = Math.sqrt(r[0]**2 + r[1]**2)
+
+            if (dist <= h) {
+                return (315/(64*Math.PI*h**9)) * (h**2 - dist**2)**3
+            }
+            else {
+                return 0
+            }
+        }
+
+        function wpoly_6_grad(r, h) {
+            constant = (-945/(32*Math.PI*h**9)) 
+            dist = Math.sqrt(r[0]**2 + r[1]**2)
+
+            end = (h**2 - dist**2)**2
+
+            if (dist <= h) {
+                return [
+                    constant * r[0] * end,
+                    constant * r[1] * end
+                ] }
+            else {
+                return [0, 0]
+            }
+        }
+
+        function wvisc_lap(r, h) {
+            dist = Math.sqrt(r[0]**2 + r[1]**2)
+            constant = 45/(Math.PI*h**6) 
+            term_a = (h-dist)
+            if (dist <= h) {
+                return constant * term_a
+            }
+            else {
+                return 0 }
+        }
+
+        function wspiky_grad(r, h) {
+            dist = Math.sqrt(r[0]**2 + r[1]**2)
+            term_a = -45/(Math.PI * h**6)
+            term_b =  (h-dist)**2
+            if (dist <= h) {
+                    return [
+                    term_a * (r[0]/dist) * term_b,
+                    term_a * (r[1]/dist) * term_b
+                ]
+            }
+                else {
+                    return [0, 0, 0]
+                }
+        }
+
+        
+
+        animate();
+    });
+</script>
+</body>
+</html>
