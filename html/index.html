@@ -20,14 +20,14 @@
 
 <script>
     var GRID_SIZE = 20;
-    var PSCALE = 10;
-    var KFAC = 500000;
-    var MASS = 1;
+    var PSCALE = 1;
+    var MASS = 0.1;
     var SEARCH = 2 * PSCALE;
-    var DENSITY = 998;
+    var KFAC = 7;
+    var DENSITY =998.2
     var GRAVITY = 9.8;
-    var TSCALE = 0.1;
-    var VISCFAC = 50000000;
+    var TSCALE = 0.4;
+    var VISCFAC = 1;
     var FLOOR_DAMP = 0.1
     var SMOOTHING_FAC = 0.1
 
@@ -66,7 +66,7 @@
             this.position = [x, y];
             this.size = size;
             this.ctx = ctx;
-            this.velocity = [10, 0.0];
+            this.velocity = [10, -70.0];
             this.id = id;
             this.pressure = 0;
             this.density = 0;
@@ -104,8 +104,8 @@
             for (let j = 0; j < GRID_SIZE; j++) {
         
                 particles[i][j] = new Particle(
-                    (i + 0.5) * PSCALE + canvas.width / 2 - GRID_SIZE * PSCALE / 2,
-                    (j + 0.5) * PSCALE + GRID_SIZE,
+                    (i + 0.5) * PSCALE,
+                    (j + 0.5) * PSCALE + canvas.height - (PSCALE * GRID_SIZE),
                     PSCALE,
                     id,
                     ctx
@@ -125,6 +125,7 @@
 
         function update() {
             update_position()
+            h = PSCALE/2
             h = find_neighbors()
             calc_density_and_pressure(h)
             calc_forces(h)
@@ -148,7 +149,7 @@
 
                             var dist = Math.sqrt(j_to_p[0]*j_to_p[0] + j_to_p[1]*j_to_p[1]);
 
-                            if (dist <= SEARCH) {
+                            if (dist < SEARCH) {
                                 particle.neighbors.push(jarticle.id)
                                 max_dist = Math.max(dist, max_dist)
                             }
@@ -172,8 +173,8 @@
                         jow.forEach(jarticle=> {
                             if (jarticle.id in particle.neighbors) {
                                 var j_to_p = [
-                                    particle.position[0] - jarticle.position[0],
-                                    particle.position[1] - jarticle.position[1]
+                                    (particle.position[0]) - jarticle.position[0],
+                                    (particle.position[1]) - jarticle.position[1]
                                 ]
 
                                 particle.density += jarticle.mass * wpoly_6(j_to_p, h);
@@ -267,7 +268,7 @@
                         particle.velocity[1] *= -1;
                     }
 
-                    var xsph_term = 0
+                    var xsph_term = [0, 0]
 
                     particles.forEach(jow => {
                         jow.forEach(jarticle=> {
@@ -276,12 +277,13 @@
                             particle.position[1] - jarticle.position[1],
                         ]
 
-                        xsph_term += ((2 * jarticle.mass) / (particle.density + jarticle.density)) * wpoly_6(j_to_p, h)
+                        xsph_term[0] += ((2 * jarticle.mass) / (particle.density + jarticle.density)) * (jarticle.velocity[0] - particle.velocity[0]) * wpoly_6(j_to_p, h)
+                        xsph_term[1] += ((2 * jarticle.mass) / (particle.density + jarticle.density)) * (jarticle.velocity[1] - particle.velocity[1]) * wpoly_6(j_to_p, h)
                         });
                     });
 
-                    particle.velocity[0] += xsph_term * SMOOTHING_FAC;
-                    particle.velocity[1] += xsph_term * SMOOTHING_FAC;
+                    particle.velocity[0] += xsph_term[0] * SMOOTHING_FAC;
+                    particle.velocity[1] += xsph_term[1] * SMOOTHING_FAC;
                 });
             });
         }
