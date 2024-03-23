@@ -172,7 +172,6 @@ class MFS_Solver():
         # https://eprints.bournemouth.ac.uk/23384/1/2016%20Fluid%20simulation.pdf
         # https://nccastaff.bournemouth.ac.uk/jmacey/OldWeb/MastersProjects/MSc15/06Burak/BurakErtekinMScThesis.pdf
 
-
         if (not self.solved):
             if (t==0):
                 for p in self.points:

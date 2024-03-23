@@ -26,6 +26,5 @@ INSTALLATION:
 
 TODOS:
 
-1. surface tension
-2. speed up (hashmap search)
-3. particles currently source in bounding box, not the object
+1. speed up (hashmap search)
+2. particles currently source in bounding box, not the object
