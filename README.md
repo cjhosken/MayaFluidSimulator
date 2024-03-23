@@ -15,6 +15,10 @@ http://en.wikipedia.org/wiki/Smoothed-particle_hydrodynamics
 https://cg.informatik.uni-freiburg.de/publications/2014_EG_SPH_STAR.pdf
 https://nccastaff.bournemouth.ac.uk/jmacey/MastersProject/MSc16/15/thesis.pdf
 
+        # taken from https://nccastaff.bournemouth.ac.uk/jmacey/MastersProject/MSc16/15/thesis.pdf
+        # https://eprints.bournemouth.ac.uk/23384/1/2016%20Fluid%20simulation.pdf
+        # https://nccastaff.bournemouth.ac.uk/jmacey/OldWeb/MastersProjects/MSc15/06Burak/BurakErtekinMScThesis.pdf
+
 
 INSTALLATION:
 `"C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" -m pip install --user numpy`
