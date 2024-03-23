@@ -275,6 +275,7 @@ class MFS_Solver():
                 p.velocity[0] = -p.velocity[0] 
 
             if (p.position[1] + p.velocity[1] * scale < min_point[1]):
+                #TODO: Could make this more realistic by finding the actual velocity upwards instead of only multiplying by a damping factor.
                 p.velocity[1] = -p.velocity[1] * floor_damping
 
             if (p.position[1] + p.velocity[1] * scale > max_point[1]):
