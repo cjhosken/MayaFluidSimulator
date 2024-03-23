@@ -2,8 +2,7 @@ from maya import cmds
 from maya.api import OpenMaya as om
 import os
 import math
-import random
-import sys
+import numpy as np
 
 # ------ MENUS & BUTTON FUNCTIONS------
 
@@ -85,28 +84,23 @@ def MFS_delete_menu():
 class MFS_Particle():
     def __init__(self):
         self.id = -1
-        self.initial = [[0, 0, 0], [0, 0, 0]]
-        self.position = [0, 0, 0]
-        self.velocity = [0, 0, 0]
+        self.initial = np.zeros((2, 3))
+        self.position = np.zeros(3)
+        self.velocity = np.zeros(3)
         self.mass = 0.001
         self.density = 0
         self.pressure = 0
-        self.neighbor_ids = []
-        self.total_force = [0, 0, 0]
+        self.neighbor_ids = np.array()
+        self.total_force = np.zeros(3)
 
-    def speed(self, t):
-        return math.sqrt(math.pow(self.velocity[t][0],2) + math.pow(self.velocity[t][1],2) + math.pow(self.velocity[t][2],2))
-    
-    def speedColor(self, t):
-        s = max(3, min(self.speed(t), 10)) * 0.1
-        return cmds.colorIndex(1, 210, 1/s, s, hsv=True)
-
+    def speed(self):
+        return np.linalg.norm(self.velocity)
 
 # GLOBAL VARIABLE
 solvers = []
 
 class MFS_Solver():
-    points = []
+    points = np.array()
     source_object = None
     domain_object = None
     solved = False
@@ -132,12 +126,11 @@ class MFS_Solver():
                 while iz <= max_point[2]:
                     pnt = MFS_Particle()
 
-                    pnt.initial[0] = [ix, iy, iz]
-                    pnt.initial[1] = [0, 0, 0]
+                    pnt.position = np.array([ix, iy, iz])
+                    pnt.velocity = np.zeros(3)
                     pnt.id = i
 
-                    pnt.position = pnt.initial[0]
-                    pnt.velocity = pnt.initial[1]
+                    pnt.initial = np.array([pnt.position, pnt.velocity])
 
                     self.points.append(pnt)
 
@@ -208,18 +201,13 @@ class MFS_Solver():
         max_dist = 0
 
         for p in self.points:
-            p.neighbor_ids = []
-            p.total_force = [0, 0, 0]
+            p.neighbor_ids = np.array()
+            p.total_force = np.zeros(3)
             p.mass = mass
 
             for j in self.points:
-                j_to_p = [
-                        p.position[0] - j.position[0],
-                        p.position[1] - j.position[1],
-                        p.position[2] - j.position[2]
-                    ]
                 
-                dist = math.sqrt(j_to_p[0]**2 + j_to_p[1]**2 + j_to_p[2]**2)
+                dist = np.linalg.norm(np.subtract(p.position, j.position))
 
                 if (dist < search_dist):
                     p.neighbor_ids.append(j.id)
@@ -235,12 +223,7 @@ class MFS_Solver():
 
             for j in self.points:
                 if (j.id in p.neighbor_ids):
-                    
-                    j_to_p = [
-                        p.position[0] - j.position[0],
-                        p.position[1] - j.position[1],
-                        p.position[2] - j.position[2]
-                    ]
+                    j_to_p = np.subtract(p.position, j.position)
 
                     p.density += j.mass * wpoly_6(j_to_p, h)
 
@@ -248,93 +231,50 @@ class MFS_Solver():
 
     def calc_forces(self, other_force, viscosity_factor, h):
         for p in self.points:
-            pressure_force = [0, 0, 0]
-            viscosity_force = [0, 0, 0]
-            external_force = [0, 0, 0]
+            pressure_force = np.array([0, 0, 0])
+            viscosity_force = np.array([0, 0, 0])
+            external_force = np.array([0, 0, 0])
 
             for j in self.points:
                 if (j.id in p.neighbor_ids and j.id != p.id):
-                    j_to_p = [
-                        p.position[0] - j.position[0],
-                        p.position[1] - j.position[1],
-                        p.position[2] - j.position[2]
-                    ]
+                    j_to_p = np.subtract(p.position, j.position)
 
                     pressure_term = wspiky_grad(j_to_p, h)
                     pressure_const = (j.pressure + p.pressure)/2*(j.mass / j.density)
 
-                    pressure_force[0] += pressure_const * pressure_term[0]
-                    pressure_force[1] += pressure_const * pressure_term[1]
-                    pressure_force[2] += pressure_const * pressure_term[2]
+                    pressure_force = np.add(pressure_force, np.multiply(pressure_term, pressure_const))
+
                 
-                    velocity_diff = [
-                        j.velocity[0] - p.velocity[0],
-                        j.velocity[1] - p.velocity[1],
-                        j.velocity[2] - p.velocity[2]
-                    ]
+                    velocity_diff = np.subtract(j.velocity, p.velocity)
 
                     viscosity_term = j.mass / j.density
                     viscosity_smoothing = wvisc_lap(j_to_p, h)
 
-                    viscosity_force[0] += velocity_diff[0] * viscosity_term * viscosity_smoothing
-                    viscosity_force[1] += velocity_diff[1] * viscosity_term * viscosity_smoothing
-                    viscosity_force[2] += velocity_diff[2] * viscosity_term * viscosity_smoothing
+                    viscosity_force = np.add(viscosity_force, np.multiply(velocity_diff, viscosity_term * viscosity_smoothing))
 
+            pressure_force = np.multiply(pressure_force, -1)
+            viscosity_force = np.multiply(viscosity_force, viscosity_factor)
+            external_force = np.multiply(other_force, p.mass)
 
-            pressure_force[0] *= -1
-            pressure_force[1] *= -1
-            pressure_force[2] *= -1
-
-            viscosity_force[0] *= viscosity_factor
-            viscosity_force[1] *= viscosity_factor
-            viscosity_force[2] *= viscosity_factor
-
-            external_force = [
-                other_force[0] * p.mass, 
-                other_force[1] * p.mass, 
-                other_force[2] * p.mass
-            ]
-
-            p.total_force = [
-                pressure_force[0] + viscosity_force[0] + external_force[0],
-                pressure_force[1] + viscosity_force[1] + external_force[1],
-                pressure_force[2] + viscosity_force[2] + external_force[2]
-            ]
+            p.total_force = np.add(np.add(pressure_force, viscosity_force), external_force)
         
     def calc_velocity(self, bbox, scale, h, vel_smooth, floor_damping):
         min_point = om.MPoint(bbox[0], bbox[1], bbox[2])
         max_point = om.MPoint(bbox[3], bbox[4], bbox[5])
 
         for p in self.points:
-            p.velocity[0] += (p.total_force[0] / p.mass) * scale 
-            p.velocity[1] += (p.total_force[1] / p.mass) * scale 
-            p.velocity[2] += (p.total_force[2] / p.mass) * scale
+            p.velocity = np.add(p.velocity, np.multiply(p.total_force, scale / p.mass))
 
-            xsph_term = [0, 0, 0]
+            xsph_term = np.zeros(3)
 
             for j in self.points:
-                j_to_p = [
-                    p.position[0] - j.position[0],
-                    p.position[1] - j.position[1],
-                    p.position[2] - j.position[2]
-                ]
+                j_to_p = np.subtract(p.position, j.position)
+                velocity_diff = np.subtract(j.velocity, p.velocity)
 
-                velocity_diff = [
-                    j.velocity[0] - p.velocity[0],
-                    j.velocity[1] - p.velocity[1],
-                    j.velocity[2] - p.velocity[2]
-                ]
+                xsph_term = np.add(xsph_term, np.multiply(velocity_diff, ((2 * j.mass) / (p.density + j.density)) * wpoly_6(j_to_p, h)))
 
-                xsph_term += ((2 * j.mass) / (p.density + j.density)) * velocity_diff[0] * wpoly_6(j_to_p, h)
-                xsph_term += ((2 * j.mass) / (p.density + j.density)) * velocity_diff[1] * wpoly_6(j_to_p, h)
-                xsph_term += ((2 * j.mass) / (p.density + j.density)) * velocity_diff[2] * wpoly_6(j_to_p, h)
+            p.velocity = np.add(np.multiply(xsph_term, vel_smooth))
             
-
-            p.velocity[0] += vel_smooth * xsph_term,
-            p.velocity[1] += vel_smooth * xsph_term,
-            p.velocity[2] += vel_smooth * xsph_term
-            
-
             if (p.position[0] + p.velocity[0] * scale < min_point[0] or p.position[0] + p.velocity[0] * scale > max_point[0]):
                 p.velocity[0] = -p.velocity[0] 
 
@@ -350,9 +290,7 @@ class MFS_Solver():
 
     def update_position(self, start, t, scale):        
         for p in self.points:
-            p.position[0] += p.velocity[0] * scale,
-            p.position[1] += p.velocity[1] * scale,
-            p.position[2] += p.velocity[2] * scale
+            p.position = np.add(np.multiply(p.velocity, scale))
 
             cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateX', t=t+start, v=p.position[0])
             cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', t=t+start, v=p.position[1])
@@ -374,21 +312,16 @@ class MFS_Solver():
 
     def clearSim(self, start, end):
         for p in self.points:
-            p.velocity = [
-                p.velocity[0]
-                    ]
-
-            p.position = [
-                p.position[0]
-            ]
+            p.velocity = p.initial[1]
+            p.position = p.position[0]
 
             cmds.cutKey(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateX', clear=True)
             cmds.cutKey(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', clear=True )
             cmds.cutKey(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateZ', clear=True )
 
-            cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateX', t=start, v=p.position[0][0])
-            cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', t=start, v=p.position[0][1])
-            cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateZ', t=start, v=p.position[0][2])
+            cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateX', t=start, v=p.position[0])
+            cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', t=start, v=p.position[1])
+            cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateZ', t=start, v=p.position[2])
 
 def MFS_initializeSolver(pscaleCtrl, domainCtrl, *args):
     selected_objects = cmds.ls(selection=True)
@@ -558,7 +491,7 @@ def MFS_deleteSolver(*args):
 # Maths Functions
 
 def wpoly_6(r, h):
-    dist = math.sqrt(r[0]**2 + r[1]**2 + r[2]**2)
+    dist = np.linalg.norm(r)
 
     if (dist <= h):
         return (315/(64*math.pi*h**9)) * (h**2 - dist**2)**3
@@ -566,51 +499,35 @@ def wpoly_6(r, h):
         return 0
 
 def wpoly_6_grad(r, h):
-    constant = (-945/(32*math.pi*h**9)) 
-    dist = math.sqrt(r[0]**2 + r[1]**2 + r[2]**2)
-
-    end = (h**2 - dist**2)**2
+    dist = np.linalg.norm(r)
 
     if (dist <= h):
-        return [
-            constant * r[0] * end,
-            constant * r[1] * end,
-            constant * r[2] * end
-        ]
+        term = (-945/(32*math.pi*h**9)) * (h**2 - dist**2)**2
+        return np.mult(r, term)
     else:
-        return [0, 0, 0]
+        return np.zeros(3)
 
 def wpoly_6_lap(r, h):
-    constant = (-945/(32*math.pi*h**9)) 
-    dist = math.sqrt(r[0]**2 + r[1]**2 + r[2]**2)
-
-    term_a = (h**2 - dist**2)
-    term_b = (3*h**2 - 7*dist**2)
+    dist = np.linalg.norm(r)
 
     if (dist <= h):
-        return constant * term_a * term_b
+        return (-945/(32*math.pi*h**9)) * (h**2 - dist**2) * (3*h**2 - 7*dist**2)
     else:
         return 0
 
 def wspiky_grad(r, h):
-    dist = math.sqrt(r[0]**2 + r[1]**2 + r[2]**2)
-    const = -45/(math.pi * h**6)
-    term_b =  (h-dist)**2
+    dist = np.subtract(r)
+
     if (dist <= h):
-        return [
-        const * (r[0]/dist) * term_b,
-        const * (r[1]/dist) * term_b,
-        const * (r[2]/dist) * term_b
-        ]
+        term = -45/(math.pi * h**6) * (h-dist)**2
+        return np.mult(np.divide(r[0], dist), term)
     else:
-        return [0, 0, 0]
+        return np.zeros(3)
 
 def wvisc_lap(r, h):
-    dist = math.sqrt(r[0]**2 + r[1]**2 + r[2]**2)
-    constant = 45/(math.pi*h**6) 
-    term_a = (h-dist)
+    dist = np.linalg.norm(r)
     if (dist <= h):
-        return constant * term_a
+        return 45/(math.pi*h**6) * (h-dist)
     else:
         return 0
 
