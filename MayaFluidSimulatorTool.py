@@ -2,8 +2,7 @@ from maya import cmds
 from maya.api import OpenMaya as om
 import os, math
 import numpy as np
-
-# ------ MENUS & BUTTON FUNCTIONS------
+from collections import defaultdict
 
 class MFS_Plugin():
     project_path = cmds.workspace(query=True, rootDirectory=True)
@@ -34,6 +33,7 @@ class MFS_Plugin():
     smooth_ctrl = None
     bounce_ctrl = None
     mass_ctrl = None
+    cells_ctrl = None
 
     def __init__(self):
         self.MFS_create_menu()
@@ -65,13 +65,8 @@ class MFS_Plugin():
 
         cmds.columnLayout(adjustableColumn=True, parent=simulate_section)
 
-        # gravity
         self.force_ctrl = cmds.floatFieldGrp( numberOfFields=3, label='Force', extraLabel='cm', value1=0, value2=-980, value3=0 )
-
-        # viscosity
         self.visc_ctrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=0.5, field=True, label="Viscosity")
-
-        # velocity
         self.vel_ctrl = cmds.floatFieldGrp( numberOfFields=3, label='Initial Velocity', extraLabel='cm', value1=0, value2=0, value3=0 )
         
         cmds.rowLayout(numberOfColumns=3)
@@ -88,6 +83,7 @@ class MFS_Plugin():
         self.search_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.8, field=True, label="Search Distance")
         self.smooth_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=1, field=True, label="Velocity Smoothing")
         self.bounce_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.01, field=True, label="Floor Bounce")
+        self.cells_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=1, field=True, label="Cell Size")
 
         solve_row = cmds.rowLayout(numberOfColumns=2, parent=simulate_section, adjustableColumn = True)
         cmds.button(label="Solve", command=lambda x:self.MFS_runSolver())
@@ -156,6 +152,7 @@ class MFS_Plugin():
         vel_smooth = cmds.floatSliderGrp(self.smooth_ctrl, query=True, value=True)
         floor_bounce = cmds.floatSliderGrp(self.bounce_ctrl, query=True, value=True)
         mass = cmds.floatSliderGrp(self.mass_ctrl, query=True, value=True)
+        cell_size = cmds.floatSliderGrp(self.cells_ctrl, query=True, value=True)
 
         active_object = self.get_active_object()
         
@@ -166,9 +163,9 @@ class MFS_Plugin():
                 solver.clearSim(frame_range[0])
                 solver.solved = False
                 cmds.progressWindow(title='Simulating', progress=0, status='Progress: 0%', isInterruptable=True, maxValue=(frame_range[1]-frame_range[0]))
-                self.MFS_solve(solver, 0, frame_range, force, velocity, viscosity, time_scale, rest_density, kfac, search_dist, vel_smooth, floor_bounce, mass)
+                self.MFS_solve(solver, 0, frame_range, force, velocity, viscosity, time_scale, rest_density, kfac, search_dist, vel_smooth, floor_bounce, mass, cell_size)
 
-    def MFS_solve(self, solver, progress, frame_range, force, velocity, viscosity, scale, rest_density, kfac, search_dist, vel_smooth, floor_damping, mass):        
+    def MFS_solve(self, solver, progress, frame_range, force, velocity, viscosity, scale, rest_density, kfac, search_dist, vel_smooth, floor_damping, mass, cell_size):        
         t = int(cmds.currentTime(query=True))
 
         solver.solved = (t < frame_range[0] or t > frame_range[1])
@@ -177,12 +174,12 @@ class MFS_Plugin():
             cmds.progressWindow(endProgress=1)
             return
         
-        solver.update(frame_range[0], force, velocity, viscosity, scale, rest_density, kfac, search_dist, vel_smooth, floor_damping, mass)
+        solver.update(frame_range[0], force, velocity, viscosity, scale, rest_density, kfac, search_dist, vel_smooth, floor_damping, mass, cell_size)
         progress += 1
 
         cmds.progressWindow(e=1, progress=progress, status=f'Progress: {progress}%')
         cmds.currentTime(t + 1, edit=True)
-        self.MFS_solve(solver, progress, frame_range, force, velocity, viscosity, scale, rest_density, kfac, search_dist, vel_smooth, floor_damping, mass)
+        self.MFS_solve(solver, progress, frame_range, force, velocity, viscosity, scale, rest_density, kfac, search_dist, vel_smooth, floor_damping, mass, cell_size)
 
     def MFS_clearSolver(self):
         active_object = self.get_active_object()
@@ -198,8 +195,7 @@ class MFS_Plugin():
     
         for solver in self.solvers:
             if (solver.source_object == active_object):
-                print("DELETE")
-                self.solvers = np.delete(self.solvers, [solver])
+                self.solvers = np.delete(self.solvers, np.where(self.solvers == solver)[0])
 
         for obj in self.MFS_objects.values():
             if (cmds.objExists(f"{obj}_{active_object}")):
@@ -221,9 +217,6 @@ class MFS_Plugin():
         )
         
         return None
-        
-
-# ------ CLASSES ------
 
 class MFS_Particle():
     def __init__(self):
@@ -246,8 +239,12 @@ class MFS_Solver():
     domain_object = None
     solved = False
     initialized = False
+    pscale = 0
+    cell_size = 0
+    hash_table = defaultdict(list)
 
     def initialize(self, pscale):
+        self.pscale = pscale
         bounding_box = cmds.exactWorldBoundingBox(self.source_object)
         min_point = om.MPoint(bounding_box[0], bounding_box[1], bounding_box[2])
         max_point = om.MPoint(bounding_box[3], bounding_box[4], bounding_box[5])
@@ -297,17 +294,17 @@ class MFS_Solver():
 
             cmds.parent(sphere_name, transform_node)
             cmds.progressWindow(e=1, progress=progress, status=f'Progress: {progress}%')
+
+
         cmds.progressWindow(endProgress=1)
         self.initialized = True
 
-    def update(self, start, other_force, initial_velocity, viscosity_factor, scale, rest_density, kfac, search_dist, vel_smooth, floor_damping, mass):
+    def update(self, start, other_force, initial_velocity, viscosity_factor, scale, rest_density, kfac, search_dist, vel_smooth, floor_damping, mass, cells):
         t = (int(cmds.currentTime(query=True)) - start)
 
         bounding_box = cmds.exactWorldBoundingBox(self.domain_object)
 
-        # taken from https://nccastaff.bournemouth.ac.uk/jmacey/MastersProject/MSc16/15/thesis.pdf
-        # https://eprints.bournemouth.ac.uk/23384/1/2016%20Fluid%20simulation.pdf
-        # https://nccastaff.bournemouth.ac.uk/jmacey/OldWeb/MastersProjects/MSc15/06Burak/BurakErtekinMScThesis.pdf
+        self.cell_size = cells
 
         if (not self.solved):
             if (t==0):
@@ -322,7 +319,7 @@ class MFS_Solver():
             else:
                 self.key_position(start + t, scale)
 
-                h = self.find_neighbors(search_dist, mass)
+                h = self.find_neighbors(search_dist, mass, bounding_box)
 
                 self.calc_density_and_pressure(h, rest_density, kfac)
 
@@ -330,24 +327,21 @@ class MFS_Solver():
 
                 self.calc_velocity(bounding_box, scale, h, vel_smooth, floor_damping)
 
-    def find_neighbors(self, search_dist, mass):
-        # TODO: The current neighbor search is to check points within a certain radius. However hashmaps are much faster. Look into implementing that.
-        max_dist = 0
-
+    def find_neighbors(self, search_dist, mass, bbox):
         for p in self.points:
             p.neighbor_ids = np.array([])
             p.total_force = np.zeros(3)
             p.mass = mass
 
-            for j in self.points:
+            pics = self.get_particles_in_same_cell(p.position)
+            for j in pics:
                 
-                dist = np.linalg.norm(np.subtract(p.position, j.position))
-
-                if (dist < search_dist):
-                    p.neighbor_ids = np.append(p.neighbor_ids, np.array(j.id))
-                    max_dist = max(dist, max_dist)
+                dist = np.linalg.norm(np.subtract(p.position, j[0]))
+                
+                if (dist <= search_dist):
+                    p.neighbor_ids = np.append(p.neighbor_ids, np.array(j[1]))
             
-        return max_dist
+        return search_dist
 
 
     def calc_density_and_pressure(self, h, rest_density, kfac):
@@ -388,7 +382,6 @@ class MFS_Solver():
             external_force = np.multiply(other_force, p.mass)
 
             p.total_force = np.add(np.add(pressure_force, viscosity_force), external_force)
-            print(pressure_force)
         
     def calc_velocity(self, bbox, scale, h, vel_smooth, floor_damping):
         min_point = om.MPoint(bbox[0], bbox[1], bbox[2])
@@ -411,8 +404,7 @@ class MFS_Solver():
                 p.velocity[0] = -p.velocity[0] 
 
             if (p.position[1] + p.velocity[1] * scale < min_point[1]):
-                #TODO: Could make this more realistic by finding the actual velocity upwards instead of only multiplying by a damping factor.
-                p.velocity[1] = -p.velocity[1] * floor_damping
+                p.velocity[1] = -(p.position[1] + p.velocity[1] * scale - min_point[0]) * floor_damping
 
             if (p.position[1] + p.velocity[1] * scale > max_point[1]):
                 p.velocity[1] = -p.velocity[1]
@@ -428,6 +420,24 @@ class MFS_Solver():
             cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateX', t=frame, v=p.position[0])
             cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', t=frame, v=p.position[1])
             cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateZ', t=frame, v=p.position[2])
+
+        self.update_hashmap()
+
+    def get_hash_id(self, position):
+        return int(position[0]/self.cell_size) + self.cell_size * (int(position[1]/self.cell_size) + self.cell_size * int(position[2]/self.cell_size))
+
+    def add_to_hashmap(self, particle):
+        id = self.get_hash_id(particle.position)
+        self.hash_table[id].append([particle.position, particle.id])
+
+    def get_particles_in_same_cell(self, position):
+        id = self.get_hash_id(position)
+        return self.hash_table[id]
+
+    def update_hashmap(self):
+        self.hash_table = defaultdict(list)
+        for particle in self.points:
+            self.add_to_hashmap(particle)
 
     def clear(self, keepDomain):
         if (self.initialized):
@@ -457,8 +467,6 @@ class MFS_Solver():
             cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateY', t=start, v=p.position[1])
             cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateZ', t=start, v=p.position[2])
             
-
-# Maths Functions
 
 def wpoly_6(r, h):
     dist = np.linalg.norm(r)
