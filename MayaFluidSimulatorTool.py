@@ -4,16 +4,21 @@ import os, math
 import numpy as np
 from collections import defaultdict
 
+
+# To avoid creating Global variables that could be accessed by Maya, a Plugin class was implemented. This localizes all the variables to the script and reduces any script conflicts.
 class MFS_Plugin():
+    # For the addon to show images correctly, the project path must be set to the same folder as the script.
     project_path = cmds.workspace(query=True, rootDirectory=True)
     solvers = np.array([])
-    # make this a dictionary
+
+    # A dictionary that holds the names of generated objects. This can be customizable.
     MFS_objects = dict({
             "domain":"MFS_DOMAIN",
             "particles":"MFS_PARTICLES"
         }
     )
 
+    # Settings for the GUI
     popup_width = 500
     popup_height = 600
     button_ratio = 0.9
@@ -38,11 +43,13 @@ class MFS_Plugin():
     def __init__(self):
         self.MFS_create_menu()
 
+    # Create a menu bar heading at the top of the application.
     def MFS_create_menu(self):
         self.MFS_delete_menu()
         cmds.menu("MFS_menu", label="Maya Fluid Simulator", parent="MayaWindow", tearOff=False)
         cmds.menuItem(label="Open Maya Fluid Simulator", command=lambda x:self.MFS_popup(), image=os.path.join(self.project_path, "icons/MFS_icon_solver_512.png"))
 
+    # Create the popup GUI in which users can control the fluid simulation settings.
     def MFS_popup(self):
         cmds.window(title="Maya Fluid Simulator", widthHeight=(self.popup_width, self.popup_height))
         col = cmds.columnLayout(adjustableColumn=True)
@@ -50,33 +57,27 @@ class MFS_Plugin():
         cmds.image(width=self.popup_width/2, height=self.popup_height/4, image=os.path.join(self.project_path, "icons/MFS_banner.png"))
 
         initialize_section = cmds.frameLayout(label='Initialize', collapsable=True, collapse=False, parent=col)
-
         cmds.columnLayout(adjustableColumn=True, parent=initialize_section)
-
         self.pscale_ctrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=0.25, field=True, label="Particle Scale")
         self.domain_ctrl = cmds.checkBox(label="Keep Domain", value=True)
-        
+    
         init_row = cmds.rowLayout(numberOfColumns=2, parent=initialize_section, adjustableColumn=True)
         cmds.button(label="Initialize", command=lambda x:self.MFS_initializeSolver())
         cmds.button(label="X", command=lambda x:self.MFS_deleteSolver())
         cmds.rowLayout(init_row, edit=True, columnWidth=[(1, self.button_ratio * self.popup_width), (2, (1-self.button_ratio) * self.popup_width)])
 
         simulate_section = cmds.frameLayout(label='Simulate', collapsable=True, collapse=False, parent=col)
-
         cmds.columnLayout(adjustableColumn=True, parent=simulate_section)
-
         self.force_ctrl = cmds.floatFieldGrp( numberOfFields=3, label='Force', extraLabel='cm', value1=0, value2=-980, value3=0 )
         self.visc_ctrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=0.5, field=True, label="Viscosity")
         self.vel_ctrl = cmds.floatFieldGrp( numberOfFields=3, label='Initial Velocity', extraLabel='cm', value1=0, value2=0, value3=0 )
-        
+
         cmds.rowLayout(numberOfColumns=3)
         self.time_ctrl = cmds.intFieldGrp(numberOfFields=2, value1=1, value2=120, label="Frame Range")
         self.ts_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.01, field=True, label="Time Scale")
 
         advanced_section = cmds.frameLayout(label='Advanced', collapsable=True, collapse=False, parent=col)
-
         cmds.columnLayout(adjustableColumn=True, parent=advanced_section)
-
         self.mass_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=1, field=True, label="Particle Mass")
         self.density_ctrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=998.2, maxValue=10000, field=True, label="Rest Density")
         self.kfac_ctrl = cmds.floatSliderGrp(minValue=0, step=0.1, value=10, maxValue=100000000000, field=True, label="K Factor")
@@ -94,10 +95,12 @@ class MFS_Plugin():
             
         cmds.showWindow()
 
+    # Garbage management. Helps with script reloads.
     def MFS_delete_menu(self):
         if cmds.menu("MFS_menu", exists=True):
             cmds.deleteUI("MFS_menu", menu=True)
 
+    # Function for initializing the solver. This will create domains, a new solver, etc. At the moment, objects are limited to only one solver each.
     def MFS_initializeSolver(self):
         active_object = self.get_active_object()
         
@@ -140,6 +143,7 @@ class MFS_Plugin():
 
         cmds.select(solver.source_object)
 
+    # This function takes in the parameters from GUI and begins the fluid simulation.
     def MFS_runSolver(self):
         frame_range = cmds.intFieldGrp(self.time_ctrl, query=True, value=True)
         force = cmds.floatFieldGrp(self.force_ctrl, query=True, value=True)
@@ -165,6 +169,7 @@ class MFS_Plugin():
                 cmds.progressWindow(title='Simulating', progress=0, status='Progress: 0%', isInterruptable=True, maxValue=(frame_range[1]-frame_range[0]))
                 self.MFS_solve(solver, 0, frame_range, force, velocity, viscosity, time_scale, rest_density, kfac, search_dist, vel_smooth, floor_bounce, mass, cell_size)
 
+    # The solver function is a container for the solver solve function. This allows for a progress window and the ability to quit once a frame is finished.
     def MFS_solve(self, solver, progress, frame_range, force, velocity, viscosity, scale, rest_density, kfac, search_dist, vel_smooth, floor_damping, mass, cell_size):        
         t = int(cmds.currentTime(query=True))
 
@@ -181,6 +186,7 @@ class MFS_Plugin():
         cmds.currentTime(t + 1, edit=True)
         self.MFS_solve(solver, progress, frame_range, force, velocity, viscosity, scale, rest_density, kfac, search_dist, vel_smooth, floor_damping, mass, cell_size)
 
+    # Garbage management. MFS_clearSolver and MFS_deleteSolver help reduce the amount of memory the script uses once the user is finished.
     def MFS_clearSolver(self):
         active_object = self.get_active_object()
 
@@ -201,6 +207,7 @@ class MFS_Plugin():
             if (cmds.objExists(f"{obj}_{active_object}")):
                 cmds.delete(f"{obj}_{active_object}")
 
+    # Get active object checks that the select object is the fluid source. If it is not, it will raise an error dialog.
     def get_active_object(self):
         selected_objects = cmds.ls(selection=True)
         active_object = None
@@ -211,13 +218,15 @@ class MFS_Plugin():
             if (cmds.objectType(active_object) == "transform" and obj not in active_object for obj in self.MFS_objects.values()):
                 return active_object
                 
-        cmds.confirmDialog(title="Solver Error!", 
-            message="You need to use the solver on an object!",
-            button="Sorry"
+        cmds.confirmDialog(title="Source Error!", 
+            message="You need to select a source object!",
+            button="Oopsies"
         )
         
         return None
 
+
+# The MFS_Particle class holds the data for a fluid particle. This class is used to perform calculations inside of the simulation. It's not a physical object in Maya.
 class MFS_Particle():
     def __init__(self):
         self.id = -1
@@ -233,6 +242,8 @@ class MFS_Particle():
     def speed(self):
         return np.linalg.norm(self.velocity)
 
+
+# MFS_Solver is where all the calculation is done for the plugin.
 class MFS_Solver():
     points = np.array([])
     source_object = None
@@ -242,6 +253,8 @@ class MFS_Solver():
     pscale = 0
     cell_size = 0
     hash_table = defaultdict(list)
+
+    # Initialize generates particles inside the bounding box of the source object based on the given particle size settings. A domain object is also generated.
 
     def initialize(self, pscale):
         self.pscale = pscale
@@ -468,6 +481,11 @@ class MFS_Solver():
             cmds.setKeyframe(f"MFS_PARTICLE_{self.source_object}_{p.id:05}", attribute='translateZ', t=start, v=p.position[2])
             
 
+# Python implementation of smoothing kernel functions described in: 
+# "Fluid Simulation Using Smoothed Particle Hydrodynamics (SPH)"
+# Antonia Strantzi - NCCA - Bournemouth University, 22/08/2016
+# https://nccastaff.bournemouth.ac.uk/jmacey/MastersProject/MSc16/15/thesis.pdf
+
 def wpoly_6(r, h):
     dist = np.linalg.norm(r)
 
@@ -509,6 +527,8 @@ def wvisc_lap(r, h):
     else:
         return 0
 
+
+# Create and initialize the plugin.
 if __name__ == "__main__":
     plugin = MFS_Plugin()
     plugin.__init__()
