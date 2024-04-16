@@ -18,6 +18,7 @@ class MFS_Plugin():
             "particles":"_particle"
         }
     )
+    max_length = 9
 
     # Settings for the GUI
     popup_width = 500
@@ -65,10 +66,14 @@ class MFS_Plugin():
 
         simulate_section = cmds.frameLayout(label='Simulate', collapsable=True, collapse=False, parent=col)
         self.vel_ctrl = cmds.floatFieldGrp( numberOfFields=3, label='Initial Velocity', extraLabel='cm', value1=0, value2=0, value3=0 )
+        
+        cmds.rowLayout(numberOfColumns=3)
         self.time_ctrl = cmds.intFieldGrp(numberOfFields=2, value1=0, value2=120, label="Frame Range")
+        self.ts_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.01, field=True, label="Time Scale")
+
         solve_row = cmds.rowLayout(numberOfColumns=2, parent=simulate_section, adjustableColumn = True)
 
-        cmds.button(label="Solve", command=lambda x:self.MFS_solve())
+        cmds.button(label="Simulate", command=lambda x:self.MFS_simulate())
         cmds.button(label="X", command=lambda x:self.MFS_reset())
         cmds.rowLayout(solve_row, edit=True, columnWidth=[(1, self.button_ratio * self.popup_width), (2, (1-self.button_ratio) * self.popup_width)])
 
@@ -136,11 +141,12 @@ class MFS_Plugin():
             pass
 
     # The solver function is a container for the solver solve function. This allows for a progress window and the ability to quit once a frame is finished.
-    def MFS_solve(self):
+    def MFS_simulate(self):
         source = self.get_active_object()
 
         if (source is not None):
             frame_range = cmds.intFieldGrp(self.time_ctrl, query=True, value=True)
+            timescale = cmds.floatSliderGrp(self.ts_ctrl, query=True, value=True)
             cmds.currentTime(frame_range[0], edit=True)
 
             particles = cmds.listRelatives(source + "_particles", children=True) or []
@@ -151,34 +157,48 @@ class MFS_Plugin():
                 id = int(re.search(r"\d+$", p).group())
                 position = cmds.xform(p, query=True, translation=True, worldSpace=True)
                 velocity = cmds.floatFieldGrp(self.vel_ctrl, query=True, value=True)
+                mass = 1
 
                 points.append(MFS_Particle(
                     id=id,
                     pos=position,
-                    vel=velocity
+                    vel=velocity,
+                    mass=mass
                 ))
 
-            resx = cmds.polyCube(source + "_domain", query=True, subdivisionsX=True)
-            resy = cmds.polyCube(source + "_domain", query=True, subdivisionsY=True)
-            resz = cmds.polyCube(source + "_domain", query=True, subdivisionsZ=True)
-            resolution = (resx, resy, resz)
+            resx = int(cmds.polyCube(source + "_domain", query=True, subdivisionsX=True))
+            resy = int(cmds.polyCube(source + "_domain", query=True, subdivisionsY=True))
+            resz = int(cmds.polyCube(source + "_domain", query=True, subdivisionsZ=True))
+            resolution = np.array([resx, resy, resz])
             grid = MFS_Grid(resolution)
 
             cmds.progressWindow(title='Simulating', progress=0, status='Progress: 0%', isInterruptable=True, maxValue=(frame_range[1]-frame_range[0]))
-            self.update(points, grid, frame_range, 0)
+            self.update(source, points, grid, frame_range, timescale, 0)
 
-    def update(self, points, grid, frame_range, progress):
+    def update(self, source, points, grid, frame_range, timescale, progress):
         cmds.progressWindow(e=1, progress=progress, status=f'Progress: {progress}%')
         t = int(cmds.currentTime(query=True))
         solved = (t < frame_range[0] or t > frame_range[1])
         cancelled = cmds.progressWindow(query=True, isCancelled=True)
 
         if (not (solved or cancelled)):
+            self.keyframe(source, points, t)
+            
+            
+            
             cmds.currentTime(t + 1, edit=True)
-            self.update(points, grid, frame_range, progress=progress+1)
+            self.update(source, points, grid, frame_range, timescale, progress=progress+1)
         else:
             cmds.currentTime(frame_range[0], edit=True)
             cmds.progressWindow(endProgress=1)
+
+    def keyframe(self, source, points, t):
+        for p in points:
+            particle_name = f"{source}_particle_{p.id:09}"
+            cmds.setKeyframe(particle_name, attribute='translateX', t=t, v=p.position[0])
+            cmds.setKeyframe(particle_name, attribute='translateY', t=t, v=p.position[1])
+            cmds.setKeyframe(particle_name, attribute='translateZ', t=t, v=p.position[2])
+
 
 
     def MFS_delete(self):
@@ -201,7 +221,17 @@ class MFS_Plugin():
         pass
     
     def MFS_reset(self):
-        pass
+        source = self.get_active_object()
+        frame_range = cmds.intFieldGrp(self.time_ctrl, query=True, value=True)
+        cmds.currentTime(frame_range[0], edit=True)
+
+        if (source is not None):
+            particles = cmds.listRelatives(source + "_particles", children=True) or []
+
+            for p in particles:
+                cmds.cutKey(p, attribute='translateX', clear=True)
+                cmds.cutKey(p, attribute='translateY', clear=True)
+                cmds.cutKey(p, attribute='translateZ', clear=True)
 
     def get_active_object(self):
         selected_objects = cmds.ls(selection=True)
@@ -222,10 +252,6 @@ class MFS_Plugin():
         return None
 
     def mesh_to_points(self, mesh_name, subdivisions):
-        # Get mesh vertices and faces
-        vertices = cmds.ls(mesh_name + ".vtx[*]", fl=True)
-        faces = cmds.ls(mesh_name + ".f[*]", fl=True)
-
         # Get mesh bounding box
         bbox = cmds.exactWorldBoundingBox(mesh_name)
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
@@ -261,10 +287,6 @@ class MFS_Plugin():
         selection_list.add(mesh_name)
         dag_path = selection_list.getDagPath(0)
         
-        # Create arrays to store intersection data
-        intersection_points = om.MFloatPointArray()
-        hit_faces = om.MIntArray()
-        
         # Perform ray intersection with the mesh
         fn_mesh = om.MFnMesh(dag_path)
         intersections = fn_mesh.allIntersections(
@@ -287,15 +309,22 @@ class MFS_Plugin():
 
 
 class MFS_Particle():
-    def __init__(self, id, pos, vel) -> None:
+    def __init__(self, id, pos, vel, mass) -> None:
         self.id = id
-        self.position = pos
-        self.velocity = vel
+        self.position = np.array(pos, dtype=float)
+        self.velocity = np.array(vel, dtype=float)
+        self.mass = mass
+
+    def update(self, force, dt):
+        acceleration = force / self.mass
+        self.velocity += acceleration * dt
+        self.position += self.velocity * dt
 
 class MFS_Grid():
+
     def __init__(self, res) -> None:
         self.resolution = res
-        print(res)
+        self.cells = np.zeros(res[0], res[1], res[2])
 
 # Create and initialize the plugin.
 if __name__ == "__main__":
