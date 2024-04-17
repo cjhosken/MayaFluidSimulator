@@ -1,24 +1,15 @@
 from maya import cmds
 from maya.api import OpenMaya as om
-import os, math
-import numpy as np
-from collections import defaultdict
+import os
 import random
 import re
+import subprocess
+import sys
 
 # To avoid creating Global variables that could be accessed by Maya, a Plugin class was implemented. This localizes all the variables to the script and reduces any script conflicts.
 class MFS_Plugin():
     # For the addon to show images correctly, the project path must be set to the same folder as the script.
     project_path = cmds.workspace(query=True, rootDirectory=True)
-    solvers = np.array([])
-
-    # A dictionary that holds the names of generated objects. This can be customizable.
-    names = dict({
-            "domain":"_domain",
-            "particles":"_particle"
-        }
-    )
-    max_length = 9
 
     # Settings for the GUI
     popup_width = 500
@@ -35,6 +26,8 @@ class MFS_Plugin():
     vel_ctrl = None
     time_ctrl = None
     ts_ctrl = None
+
+    DEBUG = True
 
     def __init__(self):
         self.MFS_create_menu()
@@ -65,11 +58,12 @@ class MFS_Plugin():
         cmds.rowLayout(init_row, edit=True, columnWidth=[(1, self.button_ratio * self.popup_width), (2, (1-self.button_ratio) * self.popup_width)])
 
         simulate_section = cmds.frameLayout(label='Simulate', collapsable=True, collapse=False, parent=col)
+        self.force_ctrl = cmds.floatFieldGrp(numberOfFields=3, label='Force', extraLabel='cm', value1=0, value2=-9.8, value3=0 )
         self.vel_ctrl = cmds.floatFieldGrp( numberOfFields=3, label='Initial Velocity', extraLabel='cm', value1=0, value2=0, value3=0 )
         
         cmds.rowLayout(numberOfColumns=3)
         self.time_ctrl = cmds.intFieldGrp(numberOfFields=2, value1=0, value2=120, label="Frame Range")
-        self.ts_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.01, field=True, label="Time Scale")
+        self.ts_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.1, field=True, label="Time Scale")
 
         solve_row = cmds.rowLayout(numberOfColumns=2, parent=simulate_section, adjustableColumn = True)
 
@@ -88,6 +82,9 @@ class MFS_Plugin():
 
     # Function for initializing the solver. This will create domains, a new solver, etc. At the moment, objects are limited to only one solver each.
     def MFS_initialize(self):
+        if (self.DEBUG):
+            print("INIT: Initializing Particles...")
+
         source = self.get_active_object()
         
         if (source is not None):
@@ -114,7 +111,6 @@ class MFS_Plugin():
 
             points = self.mesh_to_points(source, subdivisions)
 
-
             particle_group_name = source + "_particles"
 
             if (cmds.objExists(particle_group_name)):
@@ -137,17 +133,25 @@ class MFS_Plugin():
             
             cmds.select(source)
 
+            if (self.DEBUG):
+                print("INIT: Particles Initialized!")
+
         else:
             pass
 
     # The solver function is a container for the solver solve function. This allows for a progress window and the ability to quit once a frame is finished.
     def MFS_simulate(self):
+        if (self.DEBUG):
+            print("SIM: Initializing Simulation...")
+
         source = self.get_active_object()
 
         if (source is not None):
+            
+            self.MFS_reset()
             frame_range = cmds.intFieldGrp(self.time_ctrl, query=True, value=True)
             timescale = cmds.floatSliderGrp(self.ts_ctrl, query=True, value=True)
-            cmds.currentTime(frame_range[0], edit=True)
+            external_force = cmds.floatFieldGrp(self.force_ctrl, query=True, value=True)
 
             particles = cmds.listRelatives(source + "_particles", children=True) or []
             points = []
@@ -155,40 +159,81 @@ class MFS_Plugin():
             for p in particles:
 
                 id = int(re.search(r"\d+$", p).group())
-                position = cmds.xform(p, query=True, translation=True, worldSpace=True)
-                velocity = cmds.floatFieldGrp(self.vel_ctrl, query=True, value=True)
+                position = np.array(cmds.xform(p, query=True, translation=True, worldSpace=True), dtype="float64")
+                velocity = np.array(cmds.floatFieldGrp(self.vel_ctrl, query=True, value=True), dtype="float64")
                 mass = 1
 
-                points.append(MFS_Particle(
+                point = MFS_Particle(
                     id=id,
                     pos=position,
                     vel=velocity,
                     mass=mass
-                ))
+                )
+
+                points = np.append(point, points)
+
+            if (self.DEBUG):
+                print("SIM: Particles Setup.")
+
+            scale = np.array(cmds.xform(source + "_domain", query=True, scale=True))
+            sizex = cmds.polyCube(source + "_domain", query=True, width=True)
+            sizey = cmds.polyCube(source + "_domain", query=True, height=True)
+            sizez = cmds.polyCube(source + "_domain", query=True, depth=True)
+            size = np.array([sizex, sizey, sizez]) * scale
 
             resx = int(cmds.polyCube(source + "_domain", query=True, subdivisionsX=True))
             resy = int(cmds.polyCube(source + "_domain", query=True, subdivisionsY=True))
             resz = int(cmds.polyCube(source + "_domain", query=True, subdivisionsZ=True))
+
             resolution = np.array([resx, resy, resz])
-            grid = MFS_Grid(resolution)
+            cell_size = size/resolution
+            grid = MFS_Grid(resolution, cell_size)
+
+            if (self.DEBUG):
+                print("SIM: Starting Simulation.")
 
             cmds.progressWindow(title='Simulating', progress=0, status='Progress: 0%', isInterruptable=True, maxValue=(frame_range[1]-frame_range[0]))
-            self.update(source, points, grid, frame_range, timescale, 0)
+            self.update(source, points, grid, frame_range, timescale, external_force, 0)
+            if (self.DEBUG):
+                print("SIM: Simulation Finished!")
 
-    def update(self, source, points, grid, frame_range, timescale, progress):
-        cmds.progressWindow(e=1, progress=progress, status=f'Progress: {progress}%')
+    def update(self, source, points, grid, frame_range, timescale, external_force, progress):
+        if (self.DEBUG):
+            print("SIM: Simulating Frame...")
+
+        percent = (progress / (frame_range[1] - frame_range[0])) * 100
+
+        cmds.progressWindow(e=1, progress=progress, status=f'Progress: {percent:.1f}%')
         t = int(cmds.currentTime(query=True))
         solved = (t < frame_range[0] or t > frame_range[1])
         cancelled = cmds.progressWindow(query=True, isCancelled=True)
 
         if (not (solved or cancelled)):
             self.keyframe(source, points, t)
-            
-            
+            grid.clear()
+
+            if (self.DEBUG):
+                print("SIM: Running P2G...")
+            grid.from_particles(points)
+
+            if (self.DEBUG):
+                print("SIM: Calculating Forces...")
+
+            grid.calc_forces(external_force)
+
+            if (self.DEBUG):
+                print("SIM: Running G2P...")
+
+            grid.to_particles(source, points, timescale)
             
             cmds.currentTime(t + 1, edit=True)
-            self.update(source, points, grid, frame_range, timescale, progress=progress+1)
+            if (self.DEBUG):
+                print("SIM: Frame Simulated!")
+            self.update(source, points, grid, frame_range, timescale, external_force, progress=progress+1)
         else:
+            if (self.DEBUG):
+                print("SIM: Simulation Cancelled.")
+
             cmds.currentTime(frame_range[0], edit=True)
             cmds.progressWindow(endProgress=1)
 
@@ -198,8 +243,6 @@ class MFS_Plugin():
             cmds.setKeyframe(particle_name, attribute='translateX', t=t, v=p.position[0])
             cmds.setKeyframe(particle_name, attribute='translateY', t=t, v=p.position[1])
             cmds.setKeyframe(particle_name, attribute='translateZ', t=t, v=p.position[2])
-
-
 
     def MFS_delete(self):
         source = self.get_active_object()
@@ -216,9 +259,6 @@ class MFS_Plugin():
 
             if (cmds.objExists(domain_name)):
                 cmds.delete(domain_name)
-        
-
-        pass
     
     def MFS_reset(self):
         source = self.get_active_object()
@@ -241,7 +281,6 @@ class MFS_Plugin():
 
             forbidden_labels = ["_domain", "_particle"]
             if all(label not in active_object for label in forbidden_labels):
-                # If none of the forbidden labels are found in the object's name, return the object
                 return active_object
                 
         cmds.confirmDialog(title="Source Error!", 
@@ -298,11 +337,7 @@ class MFS_Plugin():
         )
 
         if (intersections is not None):
-
-            # Count the number of intersections
             num_intersections = len(intersections[0])
-        
-            # If the number of intersections is odd, the point is inside the mesh
             return num_intersections % 2 != 0
 
         return False
@@ -311,22 +346,107 @@ class MFS_Plugin():
 class MFS_Particle():
     def __init__(self, id, pos, vel, mass) -> None:
         self.id = id
-        self.position = np.array(pos, dtype=float)
-        self.velocity = np.array(vel, dtype=float)
+        self.position = pos
+        self.velocity = vel
         self.mass = mass
 
-    def update(self, force, dt):
-        acceleration = force / self.mass
+    def update(self, source, force, dt):
+        domain = source + "_domain"
+        bbox = cmds.exactWorldBoundingBox(domain)
+        min_x, min_y, min_z, max_x, max_y, max_z = bbox
+
+        acceleration = np.array(force) / self.mass
+    
         self.velocity += acceleration * dt
+
+        advected = self.position + self.velocity * dt
+
+        if (advected[0] < min_x or advected[0] > max_x):
+            self.velocity[0] *= -1
+
+        if (advected[2] < min_z or advected[2] > max_z):
+            self.velocity[2] *= -1
+
+        if (advected[1] > max_y):
+            self.velocity[1] *= -1
+            
+        if (advected[1] < min_y):
+            self.velocity[1] = -(advected[1] - min_y) * 0.5
+
         self.position += self.velocity * dt
 
 class MFS_Grid():
-
-    def __init__(self, res) -> None:
+    def __init__(self, res, cell_size) -> None:
         self.resolution = res
-        self.cells = np.zeros(res[0], res[1], res[2])
+        self.cell_size = cell_size
+        self.clear()
+        self.bounds = cell_size * self.resolution
+
+    def from_particles(self, points):
+        for point in points:
+            i = int((point.position[0] + (self.bounds[0]) * 0.5) / self.cell_size[0])
+            j = int((point.position[1] + (self.bounds[1]) * 0.5) / self.cell_size[1])
+            k = int((point.position[2] + (self.bounds[2]) * 0.5) / self.cell_size[2])   
+
+            self.cells[i][j][k].velocity += point.velocity
+
+            self.cells[i][j][k].particle_count += 1
+
+    def calc_forces(self, external_force):
+        for i in range(self.resolution[0]):
+            for j in range(self.resolution[1]):
+                for k in range(self.resolution[2]):
+                    pressure_force = np.array([0, 0, 0])
+                    viscosity_force = np.array([0, 0, 0])
+
+                    total_force = pressure_force + viscosity_force + external_force
+                    self.cells[i][j][k].force = total_force
+
+    def get_cell_velocity(self, i, j, k):
+        if 0 <= i < self.resolution[0] and 0 <= j < self.resolution[1] and 0 <= k < self.resolution[2]:
+            return self.cells[i][j][k].velocity
+        else:
+            return np.array([0, 0, 0], dtype="float64")
+
+    def to_particles(self, source, points, timescale):
+        for point in points:
+            i = int((point.position[0] + (self.bounds[0]) * 0.5) / self.cell_size[0])
+            j = int((point.position[1] + (self.bounds[1]) * 0.5) / self.cell_size[1])
+            k = int((point.position[2] + (self.bounds[2]) * 0.5) / self.cell_size[2])
+
+            force = self.cells[i][j][k].force
+
+            point.update(source, force, timescale)
+
+    def clear(self):
+        initial_value = MFS_Cell()
+        self.cells = np.full(self.resolution, initial_value)
+
+class MFS_Cell():
+    def __init__(self) -> None:
+        self.velocity = np.array([0, 0, 0], dtype="float64")
+        self.pressure = 0
+        self.density = 0
+        self.force = np.array([0, 0, 0], dtype="float64")
+        self.particle_count = 0
+
+def install_modules(modules):
+        for mod in modules:
+            try:
+                # Run pip install command with full path
+                subprocess.check_call([sys.executable, "-m", "pip", "install", mod])
+                print(f"{mod} installed successfully.")
+                # You can import numpy here if needed
+            except subprocess.CalledProcessError as e:
+                print(f"An error occurred while installing {mod}: {e}")
 
 # Create and initialize the plugin.
 if __name__ == "__main__":
+    modules = ["numpy"]
+    install_modules(modules)
+
+
+    import numpy as np
     plugin = MFS_Plugin()
     plugin.__init__()
+    
