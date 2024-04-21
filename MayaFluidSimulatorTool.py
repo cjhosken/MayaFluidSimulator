@@ -40,8 +40,8 @@ class MFS_Plugin():
 
         initialize_section = cmds.frameLayout(label='Initialize', collapsable=True, collapse=False, parent=col)
         cmds.columnLayout(adjustableColumn=True, parent=initialize_section)
-        self.pscale_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.2, field=True, label="pscale")
-        self.cell_size_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.3, field=True, label="Cell Size")
+        self.pscale_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.25, field=True, label="pscale")
+        self.cell_size_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.25, field=True, label="Cell Size")
         self.random_sample_ctrl = cmds.intSliderGrp(minValue=0, value=0, field=True, label="Random Sampling")
         self.domain_size_ctrl = cmds.floatFieldGrp(numberOfFields=3, label='Domain Size', extraLabel='cm', value1=5, value2=5, value3=5)
         self.domain_ctrl = cmds.checkBox(label="Keep Domain", value=True)
@@ -57,11 +57,11 @@ class MFS_Plugin():
 
         self.density_ctrl = cmds.floatSliderGrp(minValue=0, maxValue=2000, step=0.01, value=998.2, field=True, label="Fluid Density")
         self.visc_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.1, field=True, label="Viscosity Factor")
-        self.damp_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.1, maxValue=1, field=True, label="Floor Damping")
+        self.damp_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.9, maxValue=1, field=True, label="Floor Damping")
         
         cmds.rowLayout(numberOfColumns=3)
         self.time_ctrl = cmds.intFieldGrp(numberOfFields=2, value1=0, value2=120, label="Frame Range")
-        self.ts_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.1, field=True, label="Time Scale")
+        self.ts_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.05, field=True, label="Time Scale")
 
         solve_row = cmds.rowLayout(numberOfColumns=2, parent=simulate_section, adjustableColumn = True)
 
@@ -117,8 +117,7 @@ class MFS_Plugin():
                 cmds.delete(particle_group_name)
 
             particle_group = cmds.createNode("transform", name=particle_group_name)
-        
-            
+
             for i,p in enumerate(points):
                 particle_name = f"{source}_particle_{i:09}"
                 if (cmds.objExists(particle_name)):
@@ -136,7 +135,7 @@ class MFS_Plugin():
         source = self.get_active_object()
 
         if (source is not None):
-            
+
             self.MFS_reset()
             frame_range = cmds.intFieldGrp(self.time_ctrl, query=True, value=True)
             timescale = cmds.floatSliderGrp(self.ts_ctrl, query=True, value=True)
@@ -145,6 +144,7 @@ class MFS_Plugin():
             fluid_density = cmds.floatSliderGrp(self.density_ctrl, query=True, value=True)
             viscosity_factor = cmds.floatSliderGrp(self.visc_ctrl, query=True, value=True)
             damping =  (1 - cmds.floatSliderGrp(self.damp_ctrl, query=True, value=True))
+            pscale = cmds.floatSliderGrp(self.pscale_ctrl, query=True, value=True)
 
             particles = cmds.listRelatives(source + "_particles", children=True) or []
             points = []
@@ -153,7 +153,6 @@ class MFS_Plugin():
                 id = int(re.search(r"\d+$", p).group())
                 position = np.array(cmds.xform(p, query=True, translation=True, worldSpace=True), dtype="float64")
                 velocity = np.array(cmds.floatFieldGrp(self.vel_ctrl, query=True, value=True), dtype="float64")
-                print(velocity)
 
                 point = MFS_Particle(
                     id=id,
@@ -178,10 +177,10 @@ class MFS_Plugin():
             grid = MFS_Grid(resolution, cell_size)
 
             cmds.progressWindow(title='Simulating', progress=0, status='Progress: 0%', isInterruptable=True, maxValue=(frame_range[1]-frame_range[0]))
-            self.update(source, points, grid, frame_range, timescale, external_force, fluid_density, viscosity_factor, damping, 0)
+            self.update(source, points, grid, frame_range, timescale, external_force, fluid_density, viscosity_factor, damping, pscale, 0)
 
 
-    def update(self, source, points, grid, frame_range, timescale, external_force, fluid_density, viscosity_factor, damping, progress):
+    def update(self, source, points, grid, frame_range, timescale, external_force, fluid_density, viscosity_factor, damping, pscale, progress):
         percent = (progress / (frame_range[1] - frame_range[0])) * 100
 
         cmds.progressWindow(e=1, progress=progress, status=f'Progress: {percent:.1f}%')
@@ -192,16 +191,16 @@ class MFS_Plugin():
         if (not (solved or cancelled)):
             self.keyframe(source, points, t)
             print(f"Simulating Frame: {t}")
-            grid.clear()
+            
             grid.from_particles(source, points)
-            grid.advect(source, timescale)
-            grid.apply_forces(external_force, viscosity_factor)
-            #grid.update_velocity(source, timescale)
+            grid.calc_forces(external_force, viscosity_factor, timescale)
+            grid.enforce_boundaries()
+            grid.solve_poisson()
             grid.to_particles(source, points, timescale, damping)
             
             cmds.currentTime(t + 1, edit=True)
 
-            self.update(source, points, grid, frame_range, timescale, external_force, fluid_density, viscosity_factor, damping, progress=progress+1)
+            self.update(source, points, grid, frame_range, timescale, external_force, fluid_density, viscosity_factor, damping, pscale, progress=progress+1)
         else:
             cmds.currentTime(frame_range[0], edit=True)
             cmds.progressWindow(endProgress=1)
@@ -336,22 +335,31 @@ class MFS_Particle():
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
 
         self.velocity = velocity
+        print(self.velocity)
 
-        advected = self.position + self.velocity * dt
+        advected = self.position + self.velocity
 
-        if (advected[0] < min_x or advected[0] > max_x):
-            self.velocity[0] = -self.velocity[0] 
+        if (min_x <= advected[0] <= max_x and
+            min_y <= advected[1] <= max_y and
+            min_z <= advected[2] <= max_z):
+            # If within bounds, update position
+            self.position = advected
+        else:
+            # If outside bounds, reflect the particle back into the domain
+            if advected[0] < min_x or advected[0] > max_x:
+                self.velocity[0] = -self.velocity[0]  # Reverse velocity along X-axis
 
-        if (advected[1] < min_y):
-            self.velocity[1] = -(advected[1] - min_y) * damping
+            if advected[1] > max_y:
+                self.velocity[1] = -self.velocity[1]  # Reverse velocity along Y-axis
+                
+            if advected[2] < min_z or advected[2] > max_z:
+                self.velocity[2] = -self.velocity[2]  # Reverse velocity along Z-axis
 
-        if (advected[1] > max_y):
-            self.velocity[1] = -self.velocity[1]
-                                
-        if (advected[2] < min_z or advected[2] > max_z):
-            self.velocity[2] = -self.velocity[2]
-
-        self.position += self.velocity * dt
+            if advected[1] < min_y:
+                self.velocity[1] = -self.velocity[1] * damping  # Reverse and damp velocity along Y-axis
+                
+            # Update position based on corrected velocity
+            self.position += self.velocity
 
 class MFS_Grid():
     def __init__(self, res, cell_size) -> None:
@@ -367,114 +375,132 @@ class MFS_Grid():
                     self.cells[i][j][k] = MFS_Cell()
 
     def from_particles(self, source, points):
+        # Clear the grid cells
+        self.clear()
+
+        # Iterate over each particle
         for point in points:
+            # Get the indices of the grid cell containing the particle
             i, j, k = self.get_cell(source, point)
+            self.cells[i][j][k].type = MFS_CellType.FLUID
 
-            self.cells[i][j][k].velocity += point.velocity
-            self.cells[i][j][k].particle_count += 1
-            print(f"{i}, {j}, {k}: {self.cells[i][j][k].velocity} \n pcount: {self.cells[i][j][k].particle_count}")
+            # Determine the neighborhood bounds (inclusive)
+            min_i = max(0, i - 1)
+            max_i = min(self.resolution[0] - 1, i + 1)
+            min_j = max(0, j - 1)
+            max_j = min(self.resolution[1] - 1, j + 1)
+            min_k = max(0, k - 1)
+            max_k = min(self.resolution[2] - 1, k + 1)
 
+            # Calculate the trilinear interpolation weights for the particle
+            for grid_i in range(min_i, max_i + 1):
+                for grid_j in range(min_j, max_j + 1):
+                    for grid_k in range(min_k, max_k + 1):
+                        # Calculate trilinear weights based on the distance from particle to cell center
+                        weight_i = 1 - abs(grid_i + 0.5 - point.position[0])
+                        weight_j = 1 - abs(grid_j + 0.5 - point.position[1])
+                        weight_k = 1 - abs(grid_k + 0.5 - point.position[2])
+                        weight = weight_i * weight_j * weight_k
+
+                        # Add the weighted contribution of the particle to the grid cell velocity
+                        self.cells[grid_i][grid_j][grid_k].velocity += weight * point.velocity
+
+
+    def calc_forces(self, external_force, viscosity, dt):
         for i in range(self.resolution[0]):
             for j in range(self.resolution[1]):
                 for k in range(self.resolution[2]):
-                    self.cells[i][j][k].velocity /= max(self.cells[i][j][k].particle_count, 1)
+                    total_force = np.array(external_force, dtype="float64")
+                    self.cells[i][j][k].velocity += total_force * dt
 
-    def calc_forces(self, external_force, viscosity):
-        for i in range(self.resolution[0]):
-            for j in range(self.resolution[1]):
-                for k in range(self.resolution[2]):
-                    self.cells[i][j][k].force = np.array(external_force, dtype="float64")
+    def enforce_boundaries(self):
+        pass
 
-    def advect(self, source, dt):
-        new_cells = np.empty((self.resolution[0], self.resolution[1], self.resolution[2]), dtype=object)
-
-        for i in range(self.resolution[0]):
-            for j in range(self.resolution[1]):
-                for k in range(self.resolution[2]):
-                    new_cells[i][j][k] = MFS_Cell()
-
-        for i in range (self.resolution[0]):
-            for j in range(self.resolution[1]):
-                for k in range(self.resolution[2]):
-                    velocity = self.cells[i][j][k].velocity
-
-                    advect_i = i - int((velocity[0] * dt) / self.cell_size[0] + 0.5)
-                    advect_j = j - int((velocity[1] * dt) / self.cell_size[1] + 0.5)
-                    advect_k = k - int((velocity[2] * dt) / self.cell_size[2] + 0.5)
-                    
-                    interpolated_vel, interpolated_pressure = self.interpolated_values(advect_i, advect_j, advect_k)
-
-                    new_cells[i][j][k].velocity = interpolated_vel
-                    new_cells[i][j][k].pressure = interpolated_pressure
-                    #print(new_cells[i][j][k].velocity)
-        
-        self.cells = new_cells
-
-    def interpolated_values(self, i, j, k):
-        interpolated_velocity = np.array([0, 0, 0], dtype="float64")
-        interpolated_pressure = 0
-
-        num_neighbors = 0
-
-        for dx in range(-1, 2):
-            for dy in range(-1, 2):
-                for dz in range(-1, 2):
-                    # Get the indices of the neighboring cell
-                    neighbor_i = i + dx
-                    neighbor_j = j + dy
-                    neighbor_k = k + dz
-
-                    # Check if the neighboring cell is within the grid bounds
-                    if 0 < neighbor_i < self.resolution[0] and \
-                    0 < neighbor_j < self.resolution[1] and \
-                    0 < neighbor_k < self.resolution[2]:  
-                        # Accumulate velocity and pressure values from neighboring cells
-                        interpolated_velocity += self.cells[neighbor_i][neighbor_j][neighbor_k].velocity
-                        interpolated_pressure += self.cells[neighbor_i][neighbor_j][neighbor_k].pressure
-                        if (np.linalg.norm(self.cells[neighbor_i][neighbor_j][neighbor_k].velocity) > 0):
-                            num_neighbors += 1
-
-        interpolated_velocity /= max(num_neighbors, 1)
-        interpolated_pressure /= max(num_neighbors, 1)
-
-        return [interpolated_velocity, interpolated_pressure]
-    
-    def update_velocity(self, dt):
-        for i in range (self.resolution[0]):
-            for j in range(self.resolution[1]):
-                for k in range(self.resolution[2]):
-                    self.cells[i][j][k].velocity += self.cells[i][j][k].force * dt
+    def solve_poisson(self):
+        pass
 
     def to_particles(self, source, points, dt, damping):
+        bbox = cmds.exactWorldBoundingBox(source + "_domain")
+        min_x, min_y, min_z, max_x, max_y, max_z = bbox
+
         for point in points:
-            i, j, k = self.get_cell(source, point)
-            velocity = self.cells[i][j][k].velocity
+            x = (point.position[0] - min_x) / self.cell_size[0]
+            y = (point.position[1] - min_y) / self.cell_size[1]
+            z = (point.position[2] - min_z) / self.cell_size[2]
+
+            velocity = self.trilinear_interpolate_velocity(x, y, z)
+        
+            # FLIP / PIC METHOD
+            # FLIP interpolates the change of velocity and adds it to the existing velocity
+            # PIC replaces the velocity
+
             point.advect(source, velocity, damping, dt)
+
+    def trilinear_interpolate_velocity(self, x, y, z):
+        # Determine the indices of the grid cells surrounding the position
+        i0 = int(x)
+        j0 = int(y)
+        k0 = int(z)
+
+        # Compute the fractional part for interpolation
+        fi = x - i0
+        fj = y - j0
+        fk = z - k0
+
+        # Perform trilinear interpolation
+        velocity = np.zeros(3, dtype="float64")
+        total_weight = 0
+
+        for di in range(2):
+            for dj in range(2):
+                for dk in range(2):
+                    weight = (1 - abs(di - fi)) * (1 - abs(dj - fj)) * (1 - abs(dk - fk))
+                    cell_i = i0 + di
+                    cell_j = j0 + dj
+                    cell_k = k0 + dk
+
+                    # Check if the cell is within bounds
+                    if 0 <= cell_i < self.resolution[0] and \
+                    0 <= cell_j < self.resolution[1] and \
+                    0 <= cell_k < self.resolution[2]:
+                        # Accumulate the weighted velocity
+                        if (self.cells[cell_i][cell_j][cell_k].type == MFS_CellType.FLUID):
+                            velocity += weight * self.cells[cell_i][cell_j][cell_k].velocity
+                            total_weight += weight
+
+        # Normalize the velocity if total weight is greater than 0
+        if total_weight > 0:
+            velocity /= total_weight
+
+        return velocity
 
     def get_cell(self, source, point):
         bbox = cmds.exactWorldBoundingBox(source + "_domain")
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
 
-        i = int((point.position[0] - min_x) / self.cell_size[0])
-        j = int((point.position[1] - min_y) / self.cell_size[1])
-        k = int((point.position[2] - min_z) / self.cell_size[2])
+        i = int(round((point.position[0] - min_x) / self.cell_size[0]))
+        j = int(round((point.position[1] - min_y) / self.cell_size[1]))
+        k = int(round((point.position[2] - min_z) / self.cell_size[2]))
+        
         return (i, j, k)
 
     def clear(self):
         for i in range(self.resolution[0]):
             for j in range(self.resolution[1]):
                 for k in range(self.resolution[2]):
-                    self.cells[i][j][k].velocity = np.array([0, 0, 0], dtype="float64")
-                    self.cells[i][j][k].force = np.array([0, 0, 0], dtype="float64")
-                    self.cells[i][j][k].pressure = 0
-                    self.cells[i][j][k].particle_count = 0
+                    self.cells[i][j][k].velocity = np.zeros(3, dtype="float64")
+
+
+class MFS_CellType():
+    AIR = "AIR"
+    FLUID = "FLUID"
+    BOUND = "BOUND"
 
 class MFS_Cell():
+
     def __init__(self) -> None:
-        self.velocity = np.array([0, 0, 0], dtype="float64")
-        self.force = np.array([0, 0, 0], dtype="float64")
-        self.pressure = 0
-        self.particle_count = 0
+        self.velocity = np.zeros(3, dtype="float64")
+        self.type = MFS_CellType.AIR
 
 # Create and initialize the plugin.
 if __name__ == "__main__":
