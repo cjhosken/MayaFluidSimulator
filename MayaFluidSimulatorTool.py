@@ -57,7 +57,7 @@ class MFS_Plugin():
         
         cmds.rowLayout(numberOfColumns=3)
         self.time_ctrl = cmds.intFieldGrp(numberOfFields=2, value1=0, value2=120, label="Frame Range")
-        self.ts_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.05, field=True, label="Time Scale")
+        self.ts_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.1, field=True, label="Time Scale")
 
         solve_row = cmds.rowLayout(numberOfColumns=2, parent=simulate_section, adjustableColumn = True)
 
@@ -186,12 +186,16 @@ class MFS_Plugin():
         if (not (solved or cancelled)):
             self.keyframe(source, points, t)
             print(f"Simulating Frame: {t}")
-            
-            grid.from_particles(source, points)
-            grid.calc_forces(external_force, viscosity_factor, timescale)
-            grid.enforce_boundaries()
-            grid.solve_poisson()
-            grid.to_particles(source, points, timescale, damping)
+
+            cfl_time = 0
+
+            while (cfl_time < timescale):
+                timestep = grid.from_particles(source, points, timescale)
+                grid.calc_forces(external_force, viscosity_factor, timestep)
+                grid.enforce_boundaries()
+                grid.solve_poisson()
+                grid.to_particles(source, points, timestep, damping)
+                cfl_time += timestep
             
             cmds.currentTime(t + 1, edit=True)
 
@@ -370,16 +374,11 @@ class MFS_Grid():
     def __init__(self, res, cell_size) -> None:
         self.resolution = res
         self.cell_size = cell_size
-        self.bounds = cell_size * self.resolution
 
-        self.cells = np.empty((self.resolution[0], self.resolution[1], self.resolution[2]), dtype=object)
+        self.velocity = np.zeros((self.resolution[0] + 1, self.resolution[1] + 1, self.resolution[2] + 1, 3), dtype="float64")
+        self.last_velocity = np.zeros((self.resolution[0] + 1, self.resolution[1] + 1, self.resolution[2] + 1, 3), dtype="float64")
 
-        for i in range(self.resolution[0]):
-            for j in range(self.resolution[1]):
-                for k in range(self.resolution[2]):
-                    self.cells[i][j][k] = MFS_Cell()
-
-    def from_particles(self, source, points):
+    def from_particles(self, source, points, timescale):
         bbox = cmds.exactWorldBoundingBox(source + "_domain")
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
         self.clear()
@@ -390,30 +389,69 @@ class MFS_Grid():
         # TODO: Implement a correct P2G system with trillinear interpolation and normalization
 
         for point in points:
-            x = (point.position[0] - min_x) / self.cell_size[0]
-            y = (point.position[1] - min_y) / self.cell_size[1]
-            z = (point.position[2] - min_z) / self.cell_size[2]
+            x = (point.position[0] - min_x) / self.cell_size[0] - 0.5
+            y = (point.position[1] - min_y) / self.cell_size[1] - 0.5
+            z = (point.position[2] - min_z) / self.cell_size[2] - 0.5
 
             i = int(x)
             j = int(y)
             k = int(z)
 
-            self.cells[i][j][k].type = MFS_CellType.FLUID
+            dx = x - i
+            dy = y - j
+            dz = z - k
 
-            self.cells[i][j][k].velocity += point.velocity
+            # Trilinear interpolation for u component
+            v000 = point.velocity * (1 - dx) * (1 - dy) * (1 - dz)
+            v100 = point.velocity * dx * (1 - dy) * (1 - dz)
+            v010 = point.velocity * (1 - dx) * dy * (1 - dz)
+            v110 = point.velocity * dx * dy * (1 - dz)
+            v001 = point.velocity * (1 - dx) * (1 - dy) * dz
+            v101 = point.velocity * dx * (1 - dy) * dz
+            v011 = point.velocity * (1 - dx) * dy * dz
+            v111 = point.velocity * dx * dy * dz
+
+            self.velocity[i][j][k] += v000
+
+            if (self.is_in_grid(i+1, j, k)):
+                self.velocity[i + 1][j][k] += v100
+
+            if (self.is_in_grid(i+1, j+1, k)):
+                self.velocity[i + 1][j + 1][k] += v110
+
+            if (self.is_in_grid(i+1, j, k+1)):
+                self.velocity[i + 1][j][k + 1] += v101
+
+            if (self.is_in_grid(i, j+1, k)):
+                self.velocity[i][j + 1][k] += v010
+
+            if (self.is_in_grid(i, j, k+1)):
+                self.velocity[i][j][k + 1] += v001
+
+            if (self.is_in_grid(i, j+1, k+1)):
+                self.velocity[i][j + 1][k + 1] += v011
+
+            if (self.is_in_grid(i+1, j+1, k+1)):
+                self.velocity[i + 1][j + 1][k + 1] += v111
+
+        max_vel = 0.001
 
         for i in range(self.resolution[0]):
             for j in range(self.resolution[1]):
                 for k in range(self.resolution[2]):
-                    self.cells[i][j][k].velocity /= max(self.cells[i][j][k].count, 1)
+                    max_vel = max(max_vel, np.linalg.norm(self.velocity[i][j][k]))
 
+        timestep = timescale * min(np.linalg.norm(self.cell_size) / max_vel, 1)
+
+
+        return timestep
 
     def calc_forces(self, external_force, viscosity, dt):
         for i in range(self.resolution[0]):
             for j in range(self.resolution[1]):
                 for k in range(self.resolution[2]):
                     total_force = np.array(external_force, dtype="float64")
-                    self.cells[i][j][k].velocity += total_force * dt
+                    self.velocity[i][j][k] += total_force * dt
 
     def enforce_boundaries(self):
         #TODO: Enforing boundary conditions so that particles arent projected out of the domain
@@ -432,9 +470,9 @@ class MFS_Grid():
             y = (point.position[1] - min_y) / self.cell_size[1]
             z = (point.position[2] - min_z) / self.cell_size[2]
 
-            back_x = x - (point.velocity[0] / self.cell_size[0])
-            back_y = y - (point.velocity[1] / self.cell_size[1])
-            back_z = z - (point.velocity[2] / self.cell_size[2])
+            back_x = x - (point.velocity[0] * dt) / self.cell_size[0]
+            back_y = y - (point.velocity[1] * dt) / self.cell_size[1]
+            back_z = z - (point.velocity[2] * dt) / self.cell_size[2]
 
             #TODO: FLIP / PIC METHOD
             # FLIP interpolates the change of velocity and adds it to the existing velocity
@@ -444,31 +482,81 @@ class MFS_Grid():
 
             #TODO: The particles need to get the trillinearly interpolated velocity from the grid.
 
-            velocity = self.cells[int(x)][int(y)][int(z)].velocity
-    
+            velocity = self.trilinear_interpolate_last_velocity(back_x - 0.5, back_y - 0.5, back_z - 0.5)
 
+            # Perform trilinear interpolation for velocity
+    
             point.advect(source, velocity, damping, dt)
+    
+    def trilinear_interpolate_last_velocity(self, x, y, z):
+        i = int(x)
+        j = int(y)
+        k = int(z)
+        dx = x - i
+        dy = y - j
+        dz = z - k
+
+        # Trilinear interpolation for u component
+        
+        v000 = self.last_velocity[i][j][k]
+        v100 = np.zeros(3, dtype="float64")
+        v010 = np.zeros(3, dtype="float64")
+        v110 = np.zeros(3, dtype="float64")
+        v001 = np.zeros(3, dtype="float64")
+        v101 = np.zeros(3, dtype="float64")
+        v011 = np.zeros(3, dtype="float64")
+        v111 = np.zeros(3, dtype="float64")
+
+        if (self.is_in_grid(i+1, j, k)):
+            v100 = self.last_velocity[i + 1][j][k]
+
+        if (self.is_in_grid(i, j+1, k)):
+            v010 = self.last_velocity[i][j + 1][k]
+
+        if (self.is_in_grid(i+1, j+1, k)):
+            v110 = self.last_velocity[i + 1][j + 1][k]
+
+        if (self.is_in_grid(i, j, k)):
+            v001 = self.last_velocity[i][j][k + 1]
+
+        if (self.is_in_grid(i+1, j, k+1)):
+            v101 = self.last_velocity[i + 1][j][k + 1]
+
+        if (self.is_in_grid(i, j+1, k+1)):    
+            v011 = self.last_velocity[i][j + 1][k + 1]
+
+        if (self.is_in_grid(i+1, j+1, k)):
+            v111 = self.last_velocity[i + 1][j + 1][k + 1]
+
+        # Trilinear interpolation for v and w components and interpolate them similarly
+
+        # Return the interpolated velocity
+        return trilinear_interpolate(v000, v100, v010, v110, v001, v101, v011, v111, dx, dy, dz)
+
+    def is_in_grid(self, i, j, k):
+        return (0 <= i < self.resolution[0] and \
+                0 <= j < self.resolution[1] and \
+                0 <= k < self.resolution[2]
+            )
 
     def clear(self):
-        for i in range(self.resolution[0]):
-            for j in range(self.resolution[1]):
-                for k in range(self.resolution[2]):
-                    self.cells[i][j][k].velocity = np.zeros(3, dtype="float64")
-                    self.type = MFS_CellType.AIR
-                    self.count = 0
+        self.last_velocity = self.velocity
+        self.velocity = np.zeros((self.resolution[0] + 1, self.resolution[1] + 1, self.resolution[2] + 1, 3), dtype="float64")
 
+def linear_interpolate(p0, p1, t):
+    weight = 1 - t if t > 0.5 else t
+    return p0 * (1 - weight) + p1 * weight
 
-class MFS_CellType():
-    AIR = "AIR"
-    FLUID = "FLUID"
-    BOUND = "BOUND"
+def bilinear_interpolate(p00, p10, p01, p11, x, y):
+    v0 = linear_interpolate(p00, p10, x)
+    v1 = linear_interpolate(p01, p11, x)
 
-class MFS_Cell():
+    return linear_interpolate(v0, v1, y)
 
-    def __init__(self) -> None:
-        self.velocity = np.zeros(3, dtype="float64")
-        self.type = MFS_CellType.AIR
-        self.count = 0
+def trilinear_interpolate(p000, p100, p010, p110, p001, p101, p011, p111, x, y, z):
+    v00 = bilinear_interpolate(p000, p100, p010, p110, x, y)
+    v01 = bilinear_interpolate(p001, p101, p011, p111, x, y)
+    return linear_interpolate(v00, v01, z)
 
 # Create and initialize the plugin.
 if __name__ == "__main__":
