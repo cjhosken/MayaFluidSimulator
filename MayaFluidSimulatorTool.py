@@ -3,8 +3,6 @@ from maya.api import OpenMaya as om
 import os
 import random
 import re
-import subprocess
-import sys
 
 
 # "C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" -m pip install --user numpy
@@ -12,12 +10,9 @@ import sys
 
 import numpy as np
 
-# To avoid creating Global variables that could be accessed by Maya, a Plugin class was implemented. This localizes all the variables to the script and reduces any script conflicts.
 class MFS_Plugin():
-    # For the addon to show images correctly, the project path must be set to the same folder as the script.
     project_path = cmds.workspace(query=True, rootDirectory=True)
 
-    # Settings for the GUI
     popup_width = 500
     popup_height = 600
     button_ratio = 0.9
@@ -25,13 +20,11 @@ class MFS_Plugin():
     def __init__(self):
         self.MFS_create_menu()
 
-    # Create a menu bar heading at the top of the application.
     def MFS_create_menu(self):
         self.MFS_delete_menu()
         cmds.menu("MFS_menu", label="Maya Fluid Simulator", parent="MayaWindow", tearOff=False)
         cmds.menuItem(label="Open Maya Fluid Simulator", command=lambda x:self.MFS_popup(), image=os.path.join(self.project_path, "icons/MFS_icon_solver_512.png"))
 
-    # Create the popup GUI in which users can control the fluid simulation settings.
     def MFS_popup(self):
         cmds.window(title="Maya Fluid Simulator", widthHeight=(self.popup_width, self.popup_height))
         col = cmds.columnLayout(adjustableColumn=True)
@@ -43,7 +36,10 @@ class MFS_Plugin():
         self.pscale_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.25, field=True, label="pscale")
         self.cell_size_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.25, field=True, label="Cell Size")
         self.random_sample_ctrl = cmds.intSliderGrp(minValue=0, value=0, field=True, label="Random Sampling")
+
+        #TODO: Users can set the domain to have a negative size. handle this in the code. (maybe apply scale or something?)
         self.domain_size_ctrl = cmds.floatFieldGrp(numberOfFields=3, label='Domain Size', extraLabel='cm', value1=5, value2=5, value3=5)
+
         self.domain_ctrl = cmds.checkBox(label="Keep Domain", value=True)
     
         init_row = cmds.rowLayout(numberOfColumns=2, parent=initialize_section, adjustableColumn=True)
@@ -73,12 +69,11 @@ class MFS_Plugin():
 
         cmds.showWindow()
 
-    # Garbage management. Helps with script reloads.
     def MFS_delete_menu(self):
         if cmds.menu("MFS_menu", exists=True):
             cmds.deleteUI("MFS_menu", menu=True)
 
-    # Function for initializing the solver. This will create domains, a new solver, etc. At the moment, objects are limited to only one solver each.
+
     def MFS_initialize(self):
         source = self.get_active_object()
         
@@ -129,12 +124,12 @@ class MFS_Plugin():
             
             cmds.select(source)
 
-    # The solver function is a container for the solver solve function. This allows for a progress window and the ability to quit once a frame is finished.
+    
     def MFS_simulate(self):
 
         source = self.get_active_object()
 
-        if (source is not None):
+        if (source is not None and self.can_simulate(source)):
 
             self.MFS_reset()
             frame_range = cmds.intFieldGrp(self.time_ctrl, query=True, value=True)
@@ -258,19 +253,34 @@ class MFS_Plugin():
         
         return None
 
+    def can_simulate(self, source):
+        can_simulate = cmds.objExists(source + "_domain") and cmds.objExists(source + "_particles")
+
+        if (not can_simulate):
+            cmds.confirmDialog(title="Simulation Error!", 
+                message="You need to initialize a source object!",
+                button="Oopsies"
+            )
+
+        return can_simulate
+    
+
+    # Mesh to points generates points inside of a given object.
+    # It creates a domain around the source object and splits it into subdivisions. 
+    # It then generates points inside the cells and checks if those points are inside the object
+    # When Samples = 0, it creates a uniform grid insde the object. When samples > 0, it randomly generates n(samples) points.
+
     def mesh_to_points(self, mesh_name, cell_size, samples=0):
-        # Get mesh bounding box
+    
         bbox = cmds.exactWorldBoundingBox(mesh_name)
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
 
-        # Calculate step sizes for each axis
         subdivisions = (
             int((max_x - min_x) / cell_size),
             int((max_y - min_y) / cell_size),
             int((max_z - min_z) / cell_size)
         )
 
-        # Generate points inside the mesh
         points = []
         for i in range(subdivisions[0]):
             for j in range(subdivisions[1]):
@@ -282,7 +292,6 @@ class MFS_Plugin():
                             z = min_z + (k + random.random()) * cell_size
                             point = (x, y, z)
 
-                            # Test if the point is inside the mesh
                             if self.is_point_inside_mesh(point, mesh_name):
                                 points.append(point)
                     else:
@@ -291,23 +300,22 @@ class MFS_Plugin():
                         z = min_z + (k + 0.5) * cell_size
                         point = (x, y, z)
 
-                        # Test if the point is inside the mesh
                         if self.is_point_inside_mesh(point, mesh_name):
                             points.append(point)
 
 
         return points
 
+    # Is point inside mesh takes a point and fires a random vector out from it. 
+    # If the ray intersects with a source object an uneven number of times, then it is inside the object.
+
     def is_point_inside_mesh(self, point, mesh_name):
-        # Create a ray from the point in a specific direction (e.g., towards positive X)
-        direction = om.MVector(random.random(), random.random(), random.random()) # make this a random direction
+        direction = om.MVector(random.random(), random.random(), random.random())
         
-        # Get the DAG path for the mesh
         selection_list = om.MSelectionList()
         selection_list.add(mesh_name)
         dag_path = selection_list.getDagPath(0)
         
-        # Perform ray intersection with the mesh
         fn_mesh = om.MFnMesh(dag_path)
         intersections = fn_mesh.allIntersections(
             om.MFloatPoint(point),
@@ -335,30 +343,27 @@ class MFS_Particle():
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
 
         self.velocity = velocity
-        print(self.velocity)
 
         advected = self.position + self.velocity
 
         if (min_x <= advected[0] <= max_x and
             min_y <= advected[1] <= max_y and
             min_z <= advected[2] <= max_z):
-            # If within bounds, update position
             self.position = advected
         else:
-            # If outside bounds, reflect the particle back into the domain
             if advected[0] < min_x or advected[0] > max_x:
-                self.velocity[0] = -self.velocity[0]  # Reverse velocity along X-axis
+                self.velocity[0] = -self.velocity[0]
 
             if advected[1] > max_y:
-                self.velocity[1] = -self.velocity[1]  # Reverse velocity along Y-axis
+                self.velocity[1] = -self.velocity[1]
                 
             if advected[2] < min_z or advected[2] > max_z:
-                self.velocity[2] = -self.velocity[2]  # Reverse velocity along Z-axis
+                self.velocity[2] = -self.velocity[2] 
 
+            #TODO: When reflecting the velocity, the particles seem to repeatdly move up slowly and then snap down. This is likely due to the code not conserving momentum properly.
             if advected[1] < min_y:
-                self.velocity[1] = -self.velocity[1] * damping  # Reverse and damp velocity along Y-axis
+                self.velocity[1] = -self.velocity[1] * damping
                 
-            # Update position based on corrected velocity
             self.position += self.velocity
 
 class MFS_Grid():
@@ -375,35 +380,32 @@ class MFS_Grid():
                     self.cells[i][j][k] = MFS_Cell()
 
     def from_particles(self, source, points):
-        # Clear the grid cells
+        bbox = cmds.exactWorldBoundingBox(source + "_domain")
+        min_x, min_y, min_z, max_x, max_y, max_z = bbox
         self.clear()
 
-        # Iterate over each particle
+        # This is also known as P2G. The velocity values of the particles need to be projected onto the grid.
+        # This is usually done using trillinear interpolation, however there seem to be issues with normalizing quickly.
+
+        # TODO: Implement a correct P2G system with trillinear interpolation and normalization
+
         for point in points:
-            # Get the indices of the grid cell containing the particle
-            i, j, k = self.get_cell(source, point)
+            x = (point.position[0] - min_x) / self.cell_size[0]
+            y = (point.position[1] - min_y) / self.cell_size[1]
+            z = (point.position[2] - min_z) / self.cell_size[2]
+
+            i = int(x)
+            j = int(y)
+            k = int(z)
+
             self.cells[i][j][k].type = MFS_CellType.FLUID
 
-            # Determine the neighborhood bounds (inclusive)
-            min_i = max(0, i - 1)
-            max_i = min(self.resolution[0] - 1, i + 1)
-            min_j = max(0, j - 1)
-            max_j = min(self.resolution[1] - 1, j + 1)
-            min_k = max(0, k - 1)
-            max_k = min(self.resolution[2] - 1, k + 1)
+            self.cells[i][j][k].velocity += point.velocity
 
-            # Calculate the trilinear interpolation weights for the particle
-            for grid_i in range(min_i, max_i + 1):
-                for grid_j in range(min_j, max_j + 1):
-                    for grid_k in range(min_k, max_k + 1):
-                        # Calculate trilinear weights based on the distance from particle to cell center
-                        weight_i = 1 - abs(grid_i + 0.5 - point.position[0])
-                        weight_j = 1 - abs(grid_j + 0.5 - point.position[1])
-                        weight_k = 1 - abs(grid_k + 0.5 - point.position[2])
-                        weight = weight_i * weight_j * weight_k
-
-                        # Add the weighted contribution of the particle to the grid cell velocity
-                        self.cells[grid_i][grid_j][grid_k].velocity += weight * point.velocity
+        for i in range(self.resolution[0]):
+            for j in range(self.resolution[1]):
+                for k in range(self.resolution[2]):
+                    self.cells[i][j][k].velocity /= max(self.cells[i][j][k].count, 1)
 
 
     def calc_forces(self, external_force, viscosity, dt):
@@ -414,9 +416,11 @@ class MFS_Grid():
                     self.cells[i][j][k].velocity += total_force * dt
 
     def enforce_boundaries(self):
+        #TODO: Enforing boundary conditions so that particles arent projected out of the domain
         pass
 
     def solve_poisson(self):
+        #TODO: Solve the poisson equation to make the fluid non-divergent.
         pass
 
     def to_particles(self, source, points, dt, damping):
@@ -428,67 +432,30 @@ class MFS_Grid():
             y = (point.position[1] - min_y) / self.cell_size[1]
             z = (point.position[2] - min_z) / self.cell_size[2]
 
-            velocity = self.trilinear_interpolate_velocity(x, y, z)
-        
-            # FLIP / PIC METHOD
+            back_x = x - (point.velocity[0] / self.cell_size[0])
+            back_y = y - (point.velocity[1] / self.cell_size[1])
+            back_z = z - (point.velocity[2] / self.cell_size[2])
+
+            #TODO: FLIP / PIC METHOD
             # FLIP interpolates the change of velocity and adds it to the existing velocity
             # PIC replaces the velocity
 
+            #TODO: To avoid glitching, do a backwards trace to find the velocity.
+
+            #TODO: The particles need to get the trillinearly interpolated velocity from the grid.
+
+            velocity = self.cells[int(x)][int(y)][int(z)].velocity
+    
+
             point.advect(source, velocity, damping, dt)
-
-    def trilinear_interpolate_velocity(self, x, y, z):
-        # Determine the indices of the grid cells surrounding the position
-        i0 = int(x)
-        j0 = int(y)
-        k0 = int(z)
-
-        # Compute the fractional part for interpolation
-        fi = x - i0
-        fj = y - j0
-        fk = z - k0
-
-        # Perform trilinear interpolation
-        velocity = np.zeros(3, dtype="float64")
-        total_weight = 0
-
-        for di in range(2):
-            for dj in range(2):
-                for dk in range(2):
-                    weight = (1 - abs(di - fi)) * (1 - abs(dj - fj)) * (1 - abs(dk - fk))
-                    cell_i = i0 + di
-                    cell_j = j0 + dj
-                    cell_k = k0 + dk
-
-                    # Check if the cell is within bounds
-                    if 0 <= cell_i < self.resolution[0] and \
-                    0 <= cell_j < self.resolution[1] and \
-                    0 <= cell_k < self.resolution[2]:
-                        # Accumulate the weighted velocity
-                        if (self.cells[cell_i][cell_j][cell_k].type == MFS_CellType.FLUID):
-                            velocity += weight * self.cells[cell_i][cell_j][cell_k].velocity
-                            total_weight += weight
-
-        # Normalize the velocity if total weight is greater than 0
-        if total_weight > 0:
-            velocity /= total_weight
-
-        return velocity
-
-    def get_cell(self, source, point):
-        bbox = cmds.exactWorldBoundingBox(source + "_domain")
-        min_x, min_y, min_z, max_x, max_y, max_z = bbox
-
-        i = int(round((point.position[0] - min_x) / self.cell_size[0]))
-        j = int(round((point.position[1] - min_y) / self.cell_size[1]))
-        k = int(round((point.position[2] - min_z) / self.cell_size[2]))
-        
-        return (i, j, k)
 
     def clear(self):
         for i in range(self.resolution[0]):
             for j in range(self.resolution[1]):
                 for k in range(self.resolution[2]):
                     self.cells[i][j][k].velocity = np.zeros(3, dtype="float64")
+                    self.type = MFS_CellType.AIR
+                    self.count = 0
 
 
 class MFS_CellType():
@@ -501,6 +468,7 @@ class MFS_Cell():
     def __init__(self) -> None:
         self.velocity = np.zeros(3, dtype="float64")
         self.type = MFS_CellType.AIR
+        self.count = 0
 
 # Create and initialize the plugin.
 if __name__ == "__main__":
