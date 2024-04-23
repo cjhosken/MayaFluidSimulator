@@ -508,14 +508,23 @@ class MFS_Particle():
     def advect(self, bbox, velocity, last_velocity, damping, dt, flipFac):
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
 
+        # PIC replaces the velocity of the particle with the velocity interpolated from the grid. 
+        # This often results in smoother fluid behavior, which works better for viscous fluids like honey.
         pic_vel = velocity
+
+        # FLIP finds the change in velocity from before forces are applied and divergence is solved to after.
+        # This often results in splashier fluid behvaior, which works better for water.
+
         flip_vel = self.velocity + (last_velocity - velocity)
 
+        # The two techniques are blended together using flipFac.
         self.velocity = (flipFac) * flip_vel + (1-flipFac) * pic_vel
-
+        # For more information on PIC and FLIP, read (https://www.danenglesson.com/images/portfolio/FLIP/rapport.pdf, section 3.2.8)
+        
         # Advect the particle to check if it collides with the simulation bounds.
         advected = self.position + self.velocity
 
+        #TODO: Can this be removed once proper divergence is zeroed?
         if (min_x <= advected[0] <= max_x and
             min_y <= advected[1] <= max_y and
             min_z <= advected[2] <= max_z):
