@@ -388,14 +388,16 @@ class MFS_Grid():
         # This is also known as P2G. The velocity values of the particles need to be projected onto the grid.
         # This is usually done using trillinear interpolation.
 
-        for point in points:
-            x = (point.position[0] - min_x) / self.cell_size[0] - 0.5
-            y = (point.position[1] - min_y) / self.cell_size[1] - 0.5
-            z = (point.position[2] - min_z) / self.cell_size[2] - 0.5
+        weights = np.zeros((self.resolution[0] + 1, self.resolution[1] + 1, self.resolution[2] + 1), dtype="float64")
 
-            i = int(x + 0.5)
-            j = int(y + 0.5)
-            k = int(z + 0.5)
+        for point in points:
+            x = (point.position[0] - min_x) / self.cell_size[0]
+            y = (point.position[1] - min_y) / self.cell_size[1]
+            z = (point.position[2] - min_z) / self.cell_size[2]
+
+            i = int(x)
+            j = int(y)
+            k = int(z)
 
             dx = x - i
             dy = y - j
@@ -404,24 +406,41 @@ class MFS_Grid():
             self.type[i][j][k] = 1
 
             # Trilinear interpolation for velocity components
-            v000 = point.velocity * (1 - dx) * (1 - dy) * (1 - dz)
-            v100 = point.velocity * dx * (1 - dy) * (1 - dz)
-            v010 = point.velocity * (1 - dx) * dy * (1 - dz)
-            v110 = point.velocity * dx * dy * (1 - dz)
-            v001 = point.velocity * (1 - dx) * (1 - dy) * dz
-            v101 = point.velocity * dx * (1 - dy) * dz
-            v011 = point.velocity * (1 - dx) * dy * dz
-            v111 = point.velocity * dx * dy * dz
+            w000 = (1 - dx) * (1 - dy) * (1 - dz)
+            w100 = dx * (1 - dy) * (1 - dz)
+            w010 = (1 - dx) * dy * (1 - dz)
+            w110 = dx * dy * (1 - dz)
+            w001 = (1 - dx) * (1 - dy) * dz
+            w101 = dx * (1 - dy) * dz
+            w011 = (1 - dx) * dy * dz
+            w111 = dx * dy * dz
+
+            print("SUM: ", dx + dy + dz)
 
             # Update velocity grid using trilinear interpolation
-            self.velocity[i][j][k] += v000
-            self.velocity[min(i + 1, self.resolution[0] - 1)][j][k] += v100
-            self.velocity[i][min(j + 1, self.resolution[1] - 1)][k] += v010
-            self.velocity[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] += v110
-            self.velocity[i][j][min(k + 1, self.resolution[2] - 1)] += v001
-            self.velocity[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] += v101
-            self.velocity[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += v011
-            self.velocity[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += v111
+            self.velocity[i][j][k] += point.velocity * w000
+            weights[i][j][k] += w000
+
+            self.velocity[min(i + 1, self.resolution[0] - 1)][j][k] += point.velocity * w100
+            weights[min(i + 1, self.resolution[0] - 1)][j][k] += w100
+
+            self.velocity[i][min(j + 1, self.resolution[1] - 1)][k] += point.velocity * w010
+            weights[i][min(j + 1, self.resolution[1] - 1)][k] += w010
+
+            self.velocity[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] += point.velocity * w110
+            weights[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] += w110
+
+            self.velocity[i][j][min(k + 1, self.resolution[2] - 1)] += point.velocity * w001
+            weights[i][j][min(k + 1, self.resolution[2] - 1)] += w001
+
+            self.velocity[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] += point.velocity * w101
+            weights[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] += w101
+
+            self.velocity[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += point.velocity * w011
+            weights[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += w011
+
+            self.velocity[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += point.velocity * w111
+            weights[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += w111
 
             print("VEL1: ", self.velocity[i][j][k])
 
@@ -431,6 +450,7 @@ class MFS_Grid():
         for i in range(self.resolution[0]):
             for j in range(self.resolution[1]):
                 for k in range(self.resolution[2]):
+                    self.velocity[i][j][k] /= weights[i][j][k]
                     max_vel = max(max_vel, np.linalg.norm(self.velocity[i][j][k]))
 
         timestep = timescale * min(np.linalg.norm(self.cell_size) / max_vel, 1)
@@ -462,10 +482,6 @@ class MFS_Grid():
             y = (point.position[1] - min_y) / self.cell_size[1]
             z = (point.position[2] - min_z) / self.cell_size[2]
 
-            i = int(x)
-            j = int(y)
-            k = int(z)
-
             #TODO: FLIP / PIC METHOD
             # FLIP interpolates the change of velocity and adds it to the existing velocity
             # PIC replaces the velocity
@@ -474,13 +490,13 @@ class MFS_Grid():
 
             #TODO: The particles need to get the trillinearly interpolated velocity from the grid.
 
-            velocity = self.trilinear_interpolate_velocity(x - 0.5, y - 0.5, z - 0.5)
+            velocity = self.trilinear_interpolate_velocity(x, y, z)
             point.advect(source, velocity, damping, dt)
 
     def trilinear_interpolate_velocity(self, x, y, z):
-        i = int(x + 0.5)
-        j = int(y + 0.5)
-        k = int(z + 0.5)
+        i = int(x)
+        j = int(y)
+        k = int(z)
         dx = x - i
         dy = y - j
         dz = z - k
