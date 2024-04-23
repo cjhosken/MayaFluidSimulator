@@ -1,21 +1,31 @@
-''' Maya Fluid Simulator
+''' Maya Fluid Simulator is a tool used to simulate PIC/FLIP particles.
 
+    Users are able to source custom shaped objects and simulate them in a simple box domain. The script is split into 2 parts.
+
+    The first part, MFS_Plugin() is the general tool that interacts with Maya. Here you can find code for the user interface, point sourcing inside objects, and setup for the simulation.
+
+    The second, MFS_Particle() and MFS_Grid() are where more of the technical simulation code is held. If you're looking into doing fluid simulations, that area will be more of interest.
 '''
 
+# Imports
 from maya import cmds
 from maya.api import OpenMaya as om
 import os
 import random
 import re
-from scipy.sparse.linalg import spsolve
-from scipy.sparse import csr_matrix
 
-# "C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" -m pip install --user numpy
-# "C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" -m pip install --user scipy
-# /usr/autodesk/maya2023/bin/mayapy -m pip install --user numpy
-# /usr/autodesk/maya2023/bin/mayapy -m pip install --user scipy
+''' Maya Fluid Simulator uses two external modules, numpy and scipy. Users will need to manually install these modules using the commands below.
+
+    Windows         : "C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" -m pip install --user numpy scipy
+
+    Linux           : /usr/autodesk/maya2023/bin/mayapy -m pip install --user numpy scipy
+
+    Make sure that the correct maya version is being used.    
+'''
 
 import numpy as np
+from scipy.sparse.linalg import spsolve
+from scipy.sparse import csr_matrix
 
 ''' The MFS Plugin is a general class that contains the (mainly) Maya side of the script. This allows the use of "global" variables in a contained setting. '''
 class MFS_Plugin():
@@ -26,38 +36,36 @@ class MFS_Plugin():
     button_ratio = 0.9
 
 
-    ''' Initialize the plugin by creating the header menu. '''
+    ''' __init__ initializes the plugin by creating the header menu. '''
     def __init__(self):
         self.MFS_create_menu()
 
 
-    ''' Delete any pre-existing Maya Fluid Simulator header menus, then create a new header menu.'''
+    ''' MFS_create_menu deletes any pre-existing Maya Fluid Simulator header menus, then creates a new header menu.'''
     def MFS_create_menu(self):
         self.MFS_delete_menu()
         cmds.menu("MFS_menu", label="Maya Fluid Simulator", parent="MayaWindow", tearOff=False)
         cmds.menuItem(label="Open Maya Fluid Simulator", command=lambda x:self.MFS_popup(), image=os.path.join(self.project_path, "icons/MFS_icon_solver_512.png"))
     
-    
-    ''' Creates the main UI for Maya Fluid Simulator. 
 
-        PScale                 : the size of the 
-        Cell Size              : the size of the 
-        Random Sampling        : the size of the 
-        Domain Size            : the size of the 
-        Keep Domain            : the size of the 
-        Initialize (X)         : the size of the 
+    ''' MFS_popip creates the main UI for Maya Fluid Simulator. 
 
-        Force                  : the size of the 
-        Initial Velocity       : the size of the 
-        Fluid Density          : the size of the 
-        Viscosity Factor       : the size of the 
-        Floor Damping          : the size of the 
-        PIC/FLIP Mix           : the size of the 
-        Frame Range            : the size of the 
-        Time Scale             : the size of the 
-        Simulate (X)           : the size of the 
+        Particle Scale         : The visual size of the particles
+        Cell Size              : The cell width for particle sourcing and simulation
+        Random Sampling        : The sampling value used for generating particles
+        Domain Size            : The size of the domain
+        Keep Domain            : Whether or not to replace the sourced domain
+        Initialize (X)         : Initialize the particles and create the fluid domain. X will remove the particles and domain.
 
-
+        Force                  : External forces acting on the fluid. Usually gravity.
+        Initial Velocity       : The initial velocity of the fluid particles.
+        Fluid Density*         : The density of the fluid
+        Viscosity Factor*      : The amount of viscosity that the fluid has. (Water) -> (Honey)
+        Floor Damping          : The amount of damping when particles collide with the floor
+        PIC/FLIP Mix           : The blending from PIC (0) -> (1) FLIP. PIC is often better for viscious fluids, while FLIP is good for splashy fluids.
+        Frame Range            : The range in the which simulation should run between.
+        Time Scale             : The speed of the simulation.
+        Simulate (X)           : Simulate the fluid particles. X will remove the keyframed simulation. 
 
         Setting the Maya project dir to the script location shows the plugin icons.
     '''
@@ -70,7 +78,7 @@ class MFS_Plugin():
 
         initialize_section = cmds.frameLayout(label='Initialize', collapsable=True, collapse=False, parent=col)
         cmds.columnLayout(adjustableColumn=True, parent=initialize_section)
-        self.pscale_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.25, field=True, label="PScale")
+        self.pscale_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.25, field=True, label="Particle scale")
         self.cell_size_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.25, field=True, label="Cell Size")
         self.random_sample_ctrl = cmds.intSliderGrp(minValue=0, value=0, field=True, label="Random Sampling")
 
@@ -109,13 +117,13 @@ class MFS_Plugin():
         cmds.showWindow()
 
 
-    ''' Checks if the Maya Fluid Simulator header menu exists and deletes it. '''
+    ''' MFS_delete_menu checks if the Maya Fluid Simulator header menu exists and deletes it. '''
     def MFS_delete_menu(self):
         if cmds.menu("MFS_menu", exists=True):
             cmds.deleteUI("MFS_menu", menu=True)
 
 
-    ''' Initialize uses the initialization settings to fill a selected object with fluid particles and to create a domain object. '''
+    ''' MFS_initialize uses the initialization settings to fill a selected object with fluid particles and to create a domain object. '''
     def MFS_initialize(self):
         source = self.get_active_object()
         
@@ -176,7 +184,7 @@ class MFS_Plugin():
             cmds.select(source)
 
 
-    ''' This begins the Maya Fluid Simulation from the given fluid settings. '''
+    ''' MFS_simulate begins the Maya Fluid Simulation from the given fluid settings. '''
     def MFS_simulate(self):
 
         source = self.get_active_object()
@@ -194,23 +202,23 @@ class MFS_Plugin():
             pscale = cmds.floatSliderGrp(self.pscale_ctrl, query=True, value=True)
             flipFac = cmds.floatSliderGrp(self.picflip_ctrl, query=True, value=True)
 
-            particles = cmds.listRelatives(source + "_particles", children=True) or []
-            points = []
+            maya_particles = cmds.listRelatives(source + "_particles", children=True) or []
+            particles = []
 
             # To allow the tool to simulate, even after the user has restarted Maya, the plugin looks at all the Maya object particles and creates a MFS_Particle class. 
             # It then adds all the particles to a point array to be used in the simulation.
-            for p in particles:
+            for p in maya_particles:
                 id = int(re.search(r"\d+$", p).group())
                 position = np.array(cmds.xform(p, query=True, translation=True, worldSpace=True), dtype="float64")
                 velocity = np.array(cmds.floatFieldGrp(self.vel_ctrl, query=True, value=True), dtype="float64")
 
-                point = MFS_Particle(
+                particle = MFS_Particle(
                     id=id,
                     pos=position,
                     vel=velocity
                 )
 
-                points = np.append(point, points)
+                particles = np.append(particles, particle)
 
             # Using the size of the domain and its subdivisions, a cell_size can be constructed to be used for simulating.
             scale = np.array(cmds.xform(source + "_domain", query=True, scale=True))
@@ -234,19 +242,37 @@ class MFS_Plugin():
             cmds.progressWindow(title='Simulating', progress=0, status='Progress: 0%', isInterruptable=True, maxValue=(frame_range[1]-frame_range[0]))
             
             # The simulation is then properly started in update.
-            self.update(source, points, grid, frame_range, timescale, external_force, fluid_density, viscosity_factor, damping, pscale, flipFac, 0)
+            self.update(source, particles, grid, frame_range, timescale, external_force, fluid_density, viscosity_factor, damping, pscale, flipFac, 0)
 
 
-    ''' Update is the start of an actual Fluid Simulator. It simulates the particle position frame by frame, keyframing the positions each time. 
-    The user is then able to cancel the simulation by pressing Esc, however they need to wait for the current frame to finish simulation.
+    ''' update is the start of an actual Fluid Simulator. It simulates the particle position frame by frame, keyframing the positions each time. 
+        The user is then able to cancel the simulation by pressing Esc, however they need to wait for the current frame to finish simulation.
+    
+        source                  : The fluid source object
+        particles               : The array containing the MFS_Particles
+        grid                    : The MFS_Grid which most of the calculations are done on.
+        frame_range             : The range in the which simulation should run between.
+        timescale               : The speed of the simulation.
+        external_force          : The external forces acting on the fluid. Usually gravity.
+        fluid_density*          : The density of the fluid.
+        viscosity_factor*       : The amount of fluid viscosity.
+        damping                 : The damping factor for particle-ground collisions.
+        pscale*                 : The size of the particles.
+        flipFac                 : The blending from PIC (0) -> (1) FLIP. 
+        progress                : Used to track the progress bar.
+
+        The reason why so many values are being parsed through the update function is to avoid settings changing midway though simulation.
     '''
-    def update(self, source, points, grid, frame_range, timescale, external_force, fluid_density, viscosity_factor, damping, pscale, flipFac, progress):
+    def update(self, source, particles, grid, frame_range, timescale, external_force, fluid_density, viscosity_factor, damping, pscale, flipFac, progress):
         percent = (progress / (frame_range[1] - frame_range[0])) * 100
 
         cmds.progressWindow(e=1, progress=progress, status=f'Progress: {percent:.1f}%')
         t = int(cmds.currentTime(query=True))
         solved = (t < frame_range[0] or t > frame_range[1])
         cancelled = cmds.progressWindow(query=True, isCancelled=True)
+
+        # Get the domain bounding box
+        bbox = cmds.exactWorldBoundingBox(source + "_domain")
 
         # This is the start of the simulator. The method is a python implementation of:
         #
@@ -263,37 +289,44 @@ class MFS_Plugin():
 
     
         if (not (solved or cancelled)):
-            self.keyframe(source, points, t)
-            print(f"Simulating Frame: {t}")
+            self.keyframe(source, particles, t)
+            
+            print(f"Maya Fluid Simulator | Simulating Frame: {t}")
 
             cfl_time = 0
 
             while (cfl_time < timescale):
-                grid.from_particles(source, points)
+                grid.from_particles(bbox, particles)
                 timestep = grid.calc_timestep(external_force, timescale)
                 grid.calc_forces(external_force, timestep)
                 #grid.enforce_boundaries()
                 grid.solve_poisson()
-                grid.to_particles(source, points, timestep, damping, flipFac)
+                grid.to_particles(bbox, particles, timestep, damping, flipFac)
                 cfl_time += timestep
             
             cmds.currentTime(t + 1, edit=True)
 
-            self.update(source, points, grid, frame_range, timescale, external_force, fluid_density, viscosity_factor, damping, pscale, flipFac, progress=progress+1)
+            self.update(source, particles, grid, frame_range, timescale, external_force, fluid_density, viscosity_factor, damping, pscale, flipFac, progress=progress+1)
         else:
             cmds.currentTime(frame_range[0], edit=True)
             cmds.progressWindow(endProgress=1)
 
 
-    ''' Take the simulation points, copy their positions into the Maya particles, then keyframe the positions.'''
-    def keyframe(self, source, points, t):
-        for p in points:
+    ''' keyframe take the simulation particles, copies their position into the corresponding Maya particles, then keyframes the positions.
+
+        source          : The source object
+        particles       : The array containing MFS_Particles
+        t               : the current frame value
+
+    '''
+    def keyframe(self, source, particles, t):
+        for p in particles:
             particle_name = f"{source}_particle_{p.id:09}"
             cmds.setKeyframe(particle_name, attribute='translateX', t=t, v=p.position[0])
             cmds.setKeyframe(particle_name, attribute='translateY', t=t, v=p.position[1])
             cmds.setKeyframe(particle_name, attribute='translateZ', t=t, v=p.position[2])
 
-    ''' Delete all the particles and the domain, and revert back the source object.'''
+    ''' MFS_delete deletes all the particles and the domain, and revert back the source object.'''
     def MFS_delete(self):
         source = self.get_active_object()
 
@@ -311,7 +344,7 @@ class MFS_Plugin():
                 cmds.delete(domain_name)
     
 
-    ''' Reset the simulation by deleting all the keyframes and setting the current time to the start of the frame range.'''
+    ''' MFS_reset resets the simulation by deleting all the keyframes and setting the current time to the start of the frame range.'''
     def MFS_reset(self):
         source = self.get_active_object()
         frame_range = cmds.intFieldGrp(self.time_ctrl, query=True, value=True)
@@ -326,8 +359,9 @@ class MFS_Plugin():
                 cmds.cutKey(p, attribute='translateZ', clear=True)
 
 
-    ''' This checks if the selected object can b a "source" object.
+    ''' get_active_object checks if the selected object can be a "source" object.
         An object can be a source object if it is not a domain or a particle.
+        Otherwise None is returned.
     '''
     def get_active_object(self):
         selected_objects = cmds.ls(selection=True)
@@ -347,7 +381,11 @@ class MFS_Plugin():
         return None
 
 
-    ''' This checks if the selected object has been sourced. To do so, it looks to see if a domain and particle group exist for the object.'''
+    ''' can_simulate checks if the selected object has been sourced. To do so, it looks to see if a domain and particle group exist for the object.
+        
+        source          : The selected object to test
+    
+    '''
     def can_simulate(self, source):
         can_simulate = cmds.objExists(source + "_domain") and cmds.objExists(source + "_particles")
 
@@ -360,14 +398,17 @@ class MFS_Plugin():
         return can_simulate
     
 
-    ''' Mesh to points generates points inside of a given object.
+    ''' mesh_to_points generates points inside of a given object.
         It creates a domain around the source object and splits it into subdivisions, then It creates a domain around the source object and splits it into subdivisions. 
 
-        When Samples = 0, it creates a uniform grid insde the object. When samples > 0, it randomly generates n(samples) points.
-    '''
-    def mesh_to_points(self, mesh_name, cell_size, samples=0):
+        mesh                : the mesh to convert to points
+        cell_size           : the spacing between particles. This is a scalar as we want the point generation to be uniform.
+        samples             : the number of particles to randomly generate inside a cell. When 0, the particles assume a grid formation.
     
-        bbox = cmds.exactWorldBoundingBox(mesh_name)
+    '''
+    def mesh_to_points(self, mesh, cell_size, samples=0):
+    
+        bbox = cmds.exactWorldBoundingBox(mesh)
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
 
         subdivisions = (
@@ -387,7 +428,7 @@ class MFS_Plugin():
                             z = min_z + (k + random.random()) * cell_size
                             point = (x, y, z)
 
-                            if self.is_point_inside_mesh(point, mesh_name):
+                            if self.is_point_inside_mesh(point, mesh):
                                 points.append(point)
                     else:
                         x = min_x + (i + 0.5) * cell_size
@@ -395,24 +436,26 @@ class MFS_Plugin():
                         z = min_z + (k + 0.5) * cell_size
                         point = (x, y, z)
 
-                        if self.is_point_inside_mesh(point, mesh_name):
+                        if self.is_point_inside_mesh(point, mesh):
                             points.append(point)
-
 
         return points
 
 
-    ''' This looks to see if a point is inside a specific mesh.
+    ''' is_point_inside_mesh checks if a point is inside a specific mesh.
         To do this, a ray is fired from (at a random direciton) the point. 
         If the ray interescts with the mesh an uneven number of times, the point is inside the mesh.
 
+        point       : the point position
+        mesh        : the mesh to check if the point is in
+        
         This only works if the mesh is enclosed, any gaps in the geometry can lead to unstable results.
     '''
-    def is_point_inside_mesh(self, point, mesh_name):
+    def is_point_inside_mesh(self, point, mesh):
         direction = om.MVector(random.random(), random.random(), random.random())
         
         selection_list = om.MSelectionList()
-        selection_list.add(mesh_name)
+        selection_list.add(mesh)
         dag_path = selection_list.getDagPath(0)
         
         fn_mesh = om.MFnMesh(dag_path)
@@ -431,24 +474,46 @@ class MFS_Plugin():
         return False
 
 
+
+""" ---------- The script below is the main fluid simulation code. In the case of needing this for future projects, this is where you should be looking. ---------- """
+
+
+
+''' The MFS_Particle class is used to store the simulation particle data. '''
 class MFS_Particle():
+
+    ''' __init__ initializes the particle
+        
+        id              : The point id, this is used to match the MFS_Particle to the corresponding maya particle object.
+        pos             : The position of the particle. Eg: (0.0, 2.0, 0.0)
+        vel             : The velocity of the particle. Eg: (-3.0, -2.0, 0.0)
+    
+    '''
     def __init__(self, id, pos, vel) -> None:
         self.id = id
         self.position = pos
         self.velocity = vel
 
-    def advect(self, source, velocity, velocity_change, damping, dt, flipFac):
-        bbox = cmds.exactWorldBoundingBox(source + "_domain")
+
+    ''' advect takes the interpolated velocity from the grid and adds it to the particle.
+
+        bbox            : The bounding box of the simulation domain.
+        velocity        : The current velocity.
+        last_velocity   : The velocity from last_velocity.
+        damping         : The damping factor for particle-ground collisions.
+        dt              : The timestep.
+        flipFac         : The blending from PIC (0) -> (1) FLIP. 
+
+    '''
+    def advect(self, bbox, velocity, last_velocity, damping, dt, flipFac):
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
 
-        flipFac = max(min(flipFac, 1.0), 0.0)
-
-
         pic_vel = velocity
-        flip_vel = self.velocity + velocity_change
+        flip_vel = self.velocity + (last_velocity - velocity)
 
         self.velocity = (flipFac) * flip_vel + (1-flipFac) * pic_vel
 
+        # Advect the particle to check if it collides with the simulation bounds.
         advected = self.position + self.velocity
 
         if (min_x <= advected[0] <= max_x and
@@ -471,90 +536,117 @@ class MFS_Particle():
                 
             self.position += self.velocity
 
+
+
+''' The MFS_Grid does most of the calculations for the simulation. Specifically:
+
+    Particle->Grid and Grid->Particle
+    Time-step calculation
+    Force calculation
+    enforcing boundaries
+    possion equation solving
+
+'''
 class MFS_Grid():
+
+    '''  __init__ initializes the grid values and sets up the velocity arrays.
+
+        res         : Resolution of the grid. Eg: (64, 64, 64)
+        cell_size   : The size (length) of the cell, Eg: (0.2, 0.2, 0.2)
+
+    '''
     def __init__(self, res, cell_size) -> None:
         self.resolution = res
         self.cell_size = cell_size
-        
+
+        # velocity and last_velocity are both initialized with an extra value on each axis.
+        # This is due to the velocity components being stored on the "cell borders", which involves half-indexes.
+        # More about half-indexing can be found here:
+
         self.velocity = np.zeros((self.resolution[0] + 1, self.resolution[1] + 1, self.resolution[2] + 1, 3), dtype="float64")
         self.last_velocity = np.zeros((self.resolution[0] + 1, self.resolution[1] + 1, self.resolution[2] + 1, 3), dtype="float64")
-        self.type = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
 
-    def from_particles(self, source, points):
-        bbox = cmds.exactWorldBoundingBox(source + "_domain")
+
+    ''' from_particles trilinearly interpolates the particle velocities onto the grid.
+
+        bbox               : The bounding box of the simulation domain.
+        particles          : The array containing the MFS_Particles.
+
+        This is also known as P2G (Particle to Grid) in some simulation papers.
+    '''
+    def from_particles(self, bbox, particles):
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
+        
+        # Reset the velocity components
         self.clear()
 
-        # This is also known as P2G. The velocity values of the particles need to be projected onto the grid.
-        # This is usually done using trillinear interpolation.
+        # As we're dealing with many particles, the velocity components need to be averaged.
+        # Usually, this is done by doing sum_of_particles / num_of_particles. 
+        # In trilinear interpolation, we need to do sum_of_interpolated_velocities / sum_of_weights
+        # Therefore, we need to keep track of the total weights in our grid cells
 
         weights = np.zeros((self.resolution[0] + 1, self.resolution[1] + 1, self.resolution[2] + 1), dtype="float64")
 
-        for point in points:
-            x = (point.position[0] - min_x) / self.cell_size[0]
-            y = (point.position[1] - min_y) / self.cell_size[1]
-            z = (point.position[2] - min_z) / self.cell_size[2]
+        # Iterate through all the particles in the array.
+        for p in particles:
 
-            i = int(x)
-            j = int(y)
-            k = int(z)
+            # Map the point from worldspace to grid space
+            x = (p.position[0] - min_x) / self.cell_size[0]
+            y = (p.position[1] - min_y) / self.cell_size[1]
+            z = (p.position[2] - min_z) / self.cell_size[2]
 
-            dx = x - i
-            dy = y - j
-            dz = z - k
+            # Get the trilinear weights
+            w000, w100, w010, w110, w001, w101, w011, w111, i, j, k = self.get_trilinear_weights(x, y, z)
 
-            # Clamp indices to stay within the grid boundaries
-            i = max(0, min(i, self.resolution[0] - 1))
-            j = max(0, min(j, self.resolution[1] - 1))
-            k = max(0, min(k, self.resolution[2] - 1))
-
-            self.type[i][j][k] = 1
-
-            # Trilinear interpolation for velocity components
-            w000 = (1 - dx) * (1 - dy) * (1 - dz)
-            w100 = dx * (1 - dy) * (1 - dz)
-            w010 = (1 - dx) * dy * (1 - dz)
-            w110 = dx * dy * (1 - dz)
-            w001 = (1 - dx) * (1 - dy) * dz
-            w101 = dx * (1 - dy) * dz
-            w011 = (1 - dx) * dy * dz
-            w111 = dx * dy * dz
-
-            # Update velocity grid using trilinear interpolation
-            self.velocity[i][j][k] += point.velocity * w000
+            # Update the velocity grid and weight grid using point velocity and weights.
+            self.velocity[i][j][k] += p.velocity * w000
             weights[i][j][k] += w000
 
-            self.velocity[min(i + 1, self.resolution[0] - 1)][j][k] += point.velocity * w100
+            self.velocity[min(i + 1, self.resolution[0] - 1)][j][k] += p.velocity * w100
             weights[min(i + 1, self.resolution[0] - 1)][j][k] += w100
 
-            self.velocity[i][min(j + 1, self.resolution[1] - 1)][k] += point.velocity * w010
+            self.velocity[i][min(j + 1, self.resolution[1] - 1)][k] += p.velocity * w010
             weights[i][min(j + 1, self.resolution[1] - 1)][k] += w010
 
-            self.velocity[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] += point.velocity * w110
+            self.velocity[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] += p.velocity * w110
             weights[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] += w110
 
-            self.velocity[i][j][min(k + 1, self.resolution[2] - 1)] += point.velocity * w001
+            self.velocity[i][j][min(k + 1, self.resolution[2] - 1)] += p.velocity * w001
             weights[i][j][min(k + 1, self.resolution[2] - 1)] += w001
 
-            self.velocity[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] += point.velocity * w101
+            self.velocity[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] += p.velocity * w101
             weights[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] += w101
 
-            self.velocity[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += point.velocity * w011
+            self.velocity[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += p.velocity * w011
             weights[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += w011
 
-            self.velocity[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += point.velocity * w111
+            self.velocity[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += p.velocity * w111
             weights[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += w111
 
-        # normalize the velocities
+        # Average the velocities using the calculated weights.
         for i in range(self.resolution[0]):
             for j in range(self.resolution[1]):
                 for k in range(self.resolution[2]):
                     if (weights[i][j][k] != 0):
                         self.velocity[i][j][k] /= weights[i][j][k]
 
+        # Store the velocity into a last_velocity grid so that we can calculate the change in velocity used in FLIP.
         self.last_velocity = np.array(self.velocity, copy=True)
     
+
+    ''' calc_timestep is used to create a CFL timestep. 
+    
+        It looks at the maximum velocity in the grid and adjusts the timestep so that the velocity will only move one grid cell.
+        The current implementation is by Bridson (2009) as discussed in: (https://cg.informatik.uni-freiburg.de/intern/seminar/gridFluids_fluid-EulerParticle.pdf, Section 3.4.1)
+
+        external_force      : The external force, used to predict a more stable timestep.
+        timescale           : The speed of the simulation. The timestep will never be greater than timescale.
+
+    '''
     def calc_timestep(self, external_force, timescale):
+
+        #TODO: Is the timestep actually used to move the velocity one grid cell?
+
         max_vel = 0
 
         for i in range(self.resolution[0]):
@@ -567,10 +659,17 @@ class MFS_Grid():
         timestep = timescale
 
         if (max_vel > 0):
-            timestep = max(timestep, timescale * np.linalg.norm(self.cell_size) / max_vel)
+            timestep = max(timestep, timescale * max(np.linalg.norm(self.cell_size) / max_vel, 1))
 
         return timestep
 
+
+    ''' calc forces calculates the total forces in the simulation.
+
+        external_force      : Usually gravity.
+        dt                  : timestep.
+    
+    '''
     def calc_forces(self, external_force, dt):
         for i in range(self.resolution[0]):
             for j in range(self.resolution[1]):
@@ -578,7 +677,16 @@ class MFS_Grid():
                     total_force = external_force
                     self.velocity[i][j][k] += total_force * dt
 
+
+    ''' enforce_boundaries checks to see if a border cell velocity is directing into the simulation bounds.
+        If it is, the velocity component is set to 0.
+
+        This is mentioned in (https://www.danenglesson.com/images/portfolio/FLIP/rapport.pdf, Section 3.2.5), However im not entirely sure that it is implemented correctly.
+    '''
     def enforce_boundaries(self):
+
+        #TODO: DOUBLE CHECK IF THE VELOCITY SET 0 IS THE CORRECT IMPLMENETATION.
+
         for i in range(self.resolution[0]):
             for j in range(self.resolution[1]):
                 for k in range(self.resolution[2]):
@@ -590,7 +698,13 @@ class MFS_Grid():
 
                     if (k-1 < 0 or k+1 >= self.resolution[2]):
                         self.velocity[i][j][k][2] = 0
+    
+    
+    '''solve_poisson is used to make the velocity grid divergence-free.
 
+        THIS FUNCTION IS STILL UNDER IMPLEMENTATION
+    
+    '''
     def solve_poisson(self):
         divergence = self.compute_divergence()
 
@@ -603,8 +717,12 @@ class MFS_Grid():
         pressure = pressure.reshape(self.resolution)
         self.correct_velocity(pressure)
 
-        # Find the pressyre divergence
+    
+    '''compute_divergence finds the divergence of the velocity field.
 
+        THIS FUNCTION IS STILL UNDER IMPLEMENTATION
+    
+    '''
     def compute_divergence(self):
         divergence = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
         # Find the velocity divergence
@@ -616,7 +734,13 @@ class MFS_Grid():
                                            self.velocity[i][j][k + 1][2] - self.velocity[i][j][k][2])
                     
         return divergence
+    
+    
+    '''construct_coefficient_matrix creates a matrix that can be used for Preconditioned Conjugate Gradient Method. Not entirely sure what that means but we're working on it.
 
+        THIS FUNCTION IS STILL UNDER IMPLEMENTATION
+    
+    '''
     def construct_coefficient_matrix(self):
         # Construct the coefficient matrix (sparse)
         # Assuming uniform grid spacing for simplicity
@@ -643,7 +767,15 @@ class MFS_Grid():
         A = csr_matrix((data.ravel(), (np.arange(num_cells).repeat(7), np.tile(np.arange(num_cells), 7))))
 
         return A
+    
 
+    '''correct_velocity takes the pressure gradient and uses it to make the velocity divergence-free.
+
+        pressure        : The pressure gradient.
+
+        THIS FUNCTION IS STILL UNDER IMPLEMENTATION
+    
+    '''
     def correct_velocity(self, pressure):
         dx, dy, dz = self.cell_size
 
@@ -652,95 +784,103 @@ class MFS_Grid():
                 for k in range(self.resolution[2]):
                     self.velocity[i][j][k][0] -= (pressure[i][j][k] - pressure[i - 1][j][k]) / dx
 
-        # Correct v-component of velocity (stored at y edges)
         for i in range(self.resolution[0]):
             for j in range(1, self.resolution[1]):
                 for k in range(self.resolution[2]):
                     self.velocity[i][j][k][1] -= (pressure[i][j][k] - pressure[i][j - 1][k]) / dy
 
-        # Correct w-component of velocity (stored at z edges)
         for i in range(self.resolution[0]):
             for j in range(self.resolution[1]):
                 for k in range(1, self.resolution[2]):
                     self.velocity[i][j][k][2] -= (pressure[i][j][k] - pressure[i][j][k - 1]) / dz
-            
 
-    def to_particles(self, source, points, dt, damping, flipFac):
-        bbox = cmds.exactWorldBoundingBox(source + "_domain")
+
+    '''to_particles does the reverse of from_particles, and trilinearly interpolates the grid velocities back into the particles.
+        
+        bbox            : The bounding box of the simulation domain.
+        particles       : The array containing the MFS_Particles.
+        dt              : The timestep.
+        damping         : The damping factor for particle-ground collisions.
+        flipFac         : The blending from PIC (0) -> (1) FLIP. 
+
+    '''
+    def to_particles(self, bbox, particles, dt, damping, flipFac):
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
 
-        for point in points:
-            x = (point.position[0] - min_x) / self.cell_size[0]
-            y = (point.position[1] - min_y) / self.cell_size[1]
-            z = (point.position[2] - min_z) / self.cell_size[2]
+        # iterate through the particles
+        for p in particles:
+            
+            # map the point from worldspace to grid space
+            x = (p.position[0] - min_x) / self.cell_size[0]
+            y = (p.position[1] - min_y) / self.cell_size[1]
+            z = (p.position[2] - min_z) / self.cell_size[2]
 
-            last_x = x - point.velocity[0] * dt / self.cell_size[0]
-            last_y = y - point.velocity[1] * dt / self.cell_size[1]
-            last_z = z - point.velocity[2] * dt / self.cell_size[2]
+            # backward trace the particle and obtain its location in grid space
+            last_x = x - p.velocity[0] * dt / self.cell_size[0]
+            last_y = y - p.velocity[1] * dt / self.cell_size[1]
+            last_z = z - p.velocity[2] * dt / self.cell_size[2]
 
+            # find the velocities at both (x,y,z) and (last_x, last_y, last_z)
+            velocity = self.trilinear_interpolate_velocity(self.velocity, x, y, z)
+            last_velocity = self.trilinear_interpolate_velocity(self.last_velocity, last_x, last_y, last_z)
+
+            # advect the particle
+            p.advect(bbox, velocity, last_velocity, damping, dt, flipFac)
+
+
+    ''' trilinear_interpolate_velocity obtains the trilinearly interpolated velocity value from the grid at (x, y, z)
+
+        vel         : The velocity grid to access velocity from.
+        x, y, z     : The coordinates of the particle in grid space.
         
+    '''
+    def trilinear_interpolate_velocity(self, vel, x, y, z):
+        # Get the trilinear weights
+        w000, w100, w010, w110, w001, w101, w011, w111, i, j, k = self.get_trilinear_weights(x, y, z)
 
-            velocity, vw = self.trilinear_interpolate_velocity(x, y, z)
-            last_velocity, lvw = self.trilinear_interpolate_last_velocity(last_x, last_y, last_z)
-
-            velocity_change = velocity/vw - last_velocity/lvw
-
-            point.advect(source, velocity/vw, velocity_change, damping, dt, flipFac)
-
-    def trilinear_interpolate_velocity(self, x, y, z):
-        i = int(x)
-        j = int(y)
-        k = int(z)
-        dx = x - i
-        dy = y - j
-        dz = z - k
-
-        # Clamp indices to stay within the grid boundaries
-        i = max(0, min(i, self.resolution[0] - 1))
-        j = max(0, min(j, self.resolution[1] - 1))
-        k = max(0, min(k, self.resolution[2] - 1))
-
-        w000 = (1 - dx) * (1 - dy) * (1 - dz)
-        w100 = dx * (1 - dy) * (1 - dz)
-        w010 = (1 - dx) * dy * (1 - dz)
-        w110 = dx * dy * (1 - dz)
-        w001 = (1 - dx) * (1 - dy) * dz
-        w101 = dx * (1 - dy) * dz
-        w011 = (1 - dx) * dy * dz
-        w111 = dx * dy * dz
-
+        # Get the velocity
         velocity = (
-            self.velocity[i][j][k] * w000 + 
-            self.velocity[min(i + 1, self.resolution[0] - 1)][j][k] * w100 +
-            self.velocity[i][min(j + 1, self.resolution[1] - 1)][k] * w010 +
-            self.velocity[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] * w110 +
-            self.velocity[i][j][min(k + 1, self.resolution[2] - 1)] * w001 +
-            self.velocity[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] * w101 +
-            self.velocity[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] * w011 +
-            self.velocity[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] * w111
+            vel[i][j][k] * w000 + 
+            vel[min(i + 1, self.resolution[0] - 1)][j][k] * w100 +
+            vel[i][min(j + 1, self.resolution[1] - 1)][k] * w010 +
+            vel[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] * w110 +
+            vel[i][j][min(k + 1, self.resolution[2] - 1)] * w001 +
+            vel[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] * w101 +
+            vel[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] * w011 +
+            vel[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] * w111
         )
 
+        # Compute the total weight
         weight = w000 + w100 + w010 + w110 + w001 + w101 + w011 + w111
 
-        # Trilinear interpolation for v and w components and interpolate them similarly
-
-        # Return the interpolated velocity
-        return (velocity, weight)
+        # Return the averaged velocity
+        return velocity / weight
     
-    def trilinear_interpolate_last_velocity(self, x, y, z):
+
+    '''get_trillinear_weights returns the weights for the 8 grid cells.
+
+        x, y, z     : The coordinates of the particle in grid space.
+    
+    '''
+    def get_trilinear_weights(self, x, y, z):
+        # Snap the grid space location to a cell index
         i = int(x)
         j = int(y)
         k = int(z)
 
+        # The difference between grid space and snapped grid space is used for trilinear interpolation
         dx = x - i
         dy = y - j
         dz = z - k
 
-        # Clamp indices to stay within the grid boundaries
+        # Clamp indices to stay within the grid boundaries.
+        # We do this after to avoid screwing with the weighting.
+        # TODO: THERE IS A POTENTIAL ERROR WITH NOT CLAMPING THE POSITIONS FROM THE START. CHECK IF THIS CAN BE IGNORED OR NOT
         i = max(0, min(i, self.resolution[0] - 1))
         j = max(0, min(j, self.resolution[1] - 1))
         k = max(0, min(k, self.resolution[2] - 1))
 
+        # Calculate the weights for the surround 8 cells
         w000 = (1 - dx) * (1 - dy) * (1 - dz)
         w100 = dx * (1 - dy) * (1 - dz)
         w010 = (1 - dx) * dy * (1 - dz)
@@ -750,24 +890,11 @@ class MFS_Grid():
         w011 = (1 - dx) * dy * dz
         w111 = dx * dy * dz
 
-        velocity = (
-            self.last_velocity[i][j][k] * w000 + 
-            self.last_velocity[min(i + 1, self.resolution[0] - 1)][j][k] * w100 +
-            self.last_velocity[i][min(j + 1, self.resolution[1] - 1)][k] * w010 +
-            self.last_velocity[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] * w110 +
-            self.last_velocity[i][j][min(k + 1, self.resolution[2] - 1)] * w001 +
-            self.last_velocity[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] * w101 +
-            self.last_velocity[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] * w011 +
-            self.last_velocity[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] * w111
-        )
+        # return the weights and the snapped position in grid space.
+        return w000, w100, w010, w110, w001, w101, w011, w111, i, j, k
 
-        weight = w000 + w100 + w010 + w110 + w001 + w101 + w011 + w111
 
-        # Trilinear interpolation for v and w components and interpolate them similarly
-
-        # Return the interpolated velocity
-        return (velocity, weight)
-  
+    '''clear resets the velocity grid.'''
     def clear(self):
         self.velocity = np.zeros((self.resolution[0] + 1, self.resolution[1] + 1, self.resolution[2] + 1, 3), dtype="float64")
 
