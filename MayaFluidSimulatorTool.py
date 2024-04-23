@@ -575,8 +575,6 @@ class MFS_Grid():
         This is also known as P2G (Particle to Grid) in some simulation papers.
     '''
     def from_particles(self, bbox, particles):
-        min_x, min_y, min_z, max_x, max_y, max_z = bbox
-        
         # Reset the velocity components
         self.clear()
 
@@ -587,16 +585,13 @@ class MFS_Grid():
 
         weights = np.zeros((self.resolution[0] + 1, self.resolution[1] + 1, self.resolution[2] + 1), dtype="float64")
 
-        # Iterate through all the particles in the array.
+        # Iterate through the particles
         for p in particles:
-
             # Map the point from worldspace to grid space
-            x = (p.position[0] - min_x) / self.cell_size[0]
-            y = (p.position[1] - min_y) / self.cell_size[1]
-            z = (p.position[2] - min_z) / self.cell_size[2]
+            current = self.particle_to_grid(p, bbox)
 
             # Get the trilinear weights
-            w000, w100, w010, w110, w001, w101, w011, w111, i, j, k = self.get_trilinear_weights(x, y, z)
+            w000, w100, w010, w110, w001, w101, w011, w111, i, j, k = self.get_trilinear_weights(current)
 
             # Update the velocity grid and weight grid using point velocity and weights.
             self.velocity[i][j][k] += p.velocity * w000
@@ -803,26 +798,21 @@ class MFS_Grid():
         damping         : The damping factor for particle-ground collisions.
         flipFac         : The blending from PIC (0) -> (1) FLIP. 
 
+        This is also known as G2P (Grid to Particle) in some simulation papers.
+
     '''
     def to_particles(self, bbox, particles, dt, damping, flipFac):
-        min_x, min_y, min_z, max_x, max_y, max_z = bbox
-
         # iterate through the particles
         for p in particles:
-            
-            # map the point from worldspace to grid space
-            x = (p.position[0] - min_x) / self.cell_size[0]
-            y = (p.position[1] - min_y) / self.cell_size[1]
-            z = (p.position[2] - min_z) / self.cell_size[2]
+            # Map the point from worldspace to grid space
+            current = self.particle_to_grid(p, bbox)
 
             # backward trace the particle and obtain its location in grid space
-            last_x = x - p.velocity[0] * dt / self.cell_size[0]
-            last_y = y - p.velocity[1] * dt / self.cell_size[1]
-            last_z = z - p.velocity[2] * dt / self.cell_size[2]
+            last = current - p.velocity * dt / self.cell_size
 
-            # find the velocities at both (x,y,z) and (last_x, last_y, last_z)
-            velocity = self.trilinear_interpolate_velocity(self.velocity, x, y, z)
-            last_velocity = self.trilinear_interpolate_velocity(self.last_velocity, last_x, last_y, last_z)
+            # find the velocities at both current and last
+            velocity = self.trilinear_interpolate_velocity(self.velocity, current)
+            last_velocity = self.trilinear_interpolate_velocity(self.last_velocity, last)
 
             # advect the particle
             p.advect(bbox, velocity, last_velocity, damping, dt, flipFac)
@@ -831,12 +821,12 @@ class MFS_Grid():
     ''' trilinear_interpolate_velocity obtains the trilinearly interpolated velocity value from the grid at (x, y, z)
 
         vel         : The velocity grid to access velocity from.
-        x, y, z     : The coordinates of the particle in grid space.
+        pos     : The coordinates of the particle in grid space.
         
     '''
-    def trilinear_interpolate_velocity(self, vel, x, y, z):
+    def trilinear_interpolate_velocity(self, vel, pos):
         # Get the trilinear weights
-        w000, w100, w010, w110, w001, w101, w011, w111, i, j, k = self.get_trilinear_weights(x, y, z)
+        w000, w100, w010, w110, w001, w101, w011, w111, i, j, k = self.get_trilinear_weights(pos)
 
         # Get the velocity
         velocity = (
@@ -859,40 +849,54 @@ class MFS_Grid():
 
     '''get_trillinear_weights returns the weights for the 8 grid cells.
 
-        x, y, z     : The coordinates of the particle in grid space.
+        pos     : The coordinates of the particle in grid space.
     
     '''
-    def get_trilinear_weights(self, x, y, z):
+    def get_trilinear_weights(self, pos):
         # Snap the grid space location to a cell index
-        i = int(x)
-        j = int(y)
-        k = int(z)
+        ijk = np.array([int(pos[0]), int(pos[1]), int(pos[2])], dtype="float64")
 
         # The difference between grid space and snapped grid space is used for trilinear interpolation
-        dx = x - i
-        dy = y - j
-        dz = z - k
+        dc = pos - ijk
 
         # Clamp indices to stay within the grid boundaries.
         # We do this after to avoid screwing with the weighting.
         # TODO: THERE IS A POTENTIAL ERROR WITH NOT CLAMPING THE POSITIONS FROM THE START. CHECK IF THIS CAN BE IGNORED OR NOT
-        i = max(0, min(i, self.resolution[0] - 1))
-        j = max(0, min(j, self.resolution[1] - 1))
-        k = max(0, min(k, self.resolution[2] - 1))
+        i = max(0, min(ijk[0], self.resolution[0] - 1))
+        j = max(0, min(ijk[1], self.resolution[1] - 1))
+        k = max(0, min(ijk[2], self.resolution[2] - 1))
 
         # Calculate the weights for the surround 8 cells
-        w000 = (1 - dx) * (1 - dy) * (1 - dz)
-        w100 = dx * (1 - dy) * (1 - dz)
-        w010 = (1 - dx) * dy * (1 - dz)
-        w110 = dx * dy * (1 - dz)
-        w001 = (1 - dx) * (1 - dy) * dz
-        w101 = dx * (1 - dy) * dz
-        w011 = (1 - dx) * dy * dz
-        w111 = dx * dy * dz
+        w000 = (1 - dc[0]) * (1 - dc[1]) * (1 - dc[2])
+        w100 = dc[0] * (1 - dc[1]) * (1 - dc[2])
+        w010 = (1 - dc[0]) * dc[1] * (1 - dc[2])
+        w110 = dc[0] * dc[1] * (1 - dc[2])
+        w001 = (1 - dc[0]) * (1 - dc[1]) * dc[2]
+        w101 = dc[0] * (1 - dc[1]) * dc[2]
+        w011 = (1 - dc[0]) * dc[1] * dc[2]
+        w111 = dc[0] * dc[1] * dc[2]
 
         # return the weights and the snapped position in grid space.
         return w000, w100, w010, w110, w001, w101, w011, w111, i, j, k
+    
+    '''particle_to_grid converts the particle position from world space to grid space.
 
+        particle        : The MFS_Particle particle
+        bbox            : The bounding box the fluid simulation domain
+
+    '''
+    def particle_to_grid(self, particle, bbox):
+        min_x, min_y, min_z, max_x, max_y, max_z = bbox
+
+        # the particle positions are first transformed by moving the world so that the minimum bound of the domain is at (0,0,0). 
+        # This then makes obtaining the index by dividing by cell_size much easier.
+
+        u = (particle.position[0] - min_x) / self.cell_size[0]
+        v = (particle.position[1] - min_y) / self.cell_size[1]
+        w = (particle.position[2] - min_z) / self.cell_size[2]
+
+        return np.array([u, v, w], dtype="float64")
+    
 
     '''clear resets the velocity grid.'''
     def clear(self):
