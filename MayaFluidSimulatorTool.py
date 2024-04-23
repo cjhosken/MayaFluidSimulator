@@ -175,6 +175,9 @@ class MFS_Plugin():
             cell_size = size/resolution
             grid = MFS_Grid(resolution, cell_size)
 
+            external_force = np.array(external_force, dtype="float64")
+            print(external_force)
+
             cmds.progressWindow(title='Simulating', progress=0, status='Progress: 0%', isInterruptable=True, maxValue=(frame_range[1]-frame_range[0]))
             self.update(source, points, grid, frame_range, timescale, external_force, fluid_density, viscosity_factor, damping, pscale, flipFac, 0)
 
@@ -194,7 +197,8 @@ class MFS_Plugin():
             cfl_time = 0
 
             while (cfl_time < timescale):
-                timestep = grid.from_particles(source, points, timescale)
+                grid.from_particles(source, points)
+                timestep = grid.calc_timestep(external_force, timescale)
                 grid.calc_forces(external_force, timestep)
                 grid.enforce_boundaries()
                 grid.solve_poisson()
@@ -384,12 +388,13 @@ class MFS_Grid():
     def __init__(self, res, cell_size) -> None:
         self.resolution = res
         self.cell_size = cell_size
-
+        
+        self.pressure = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
         self.velocity = np.zeros((self.resolution[0] + 1, self.resolution[1] + 1, self.resolution[2] + 1, 3), dtype="float64")
         self.last_velocity = np.zeros((self.resolution[0] + 1, self.resolution[1] + 1, self.resolution[2] + 1, 3), dtype="float64")
-        self.type = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2], 3), dtype="float64")
+        self.type = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
 
-    def from_particles(self, source, points, timescale):
+    def from_particles(self, source, points):
         bbox = cmds.exactWorldBoundingBox(source + "_domain")
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
         self.clear()
@@ -456,17 +461,29 @@ class MFS_Grid():
 
         max_vel = 0.001
 
-        # Calculate timestep based on maximum velocity
+        # normalize the velocities
         for i in range(self.resolution[0]):
             for j in range(self.resolution[1]):
                 for k in range(self.resolution[2]):
                     if (weights[i][j][k] != 0):
                         self.velocity[i][j][k] /= weights[i][j][k]
-                    max_vel = max(max_vel, np.linalg.norm(self.velocity[i][j][k]))
-
-        timestep = timescale * min(np.linalg.norm(self.cell_size) / max_vel, 1)
 
         self.last_velocity = np.array(self.velocity, copy=True)
+    
+    def calc_timestep(self, external_force, timescale):
+        max_vel = 0
+
+        for i in range(self.resolution[0]):
+            for j in range(self.resolution[1]):
+                for k in range(self.resolution[2]):
+                    max_vel = max(max_vel, np.linalg.norm(self.velocity[i][j][k]))
+
+        max_vel += np.linalg.norm(external_force * self.cell_size)
+
+        timestep = timescale
+
+        if (max_vel > 0):
+            timestep = max(timestep, timescale * np.linalg.norm(self.cell_size) / max_vel)
 
         return timestep
 
@@ -474,16 +491,38 @@ class MFS_Grid():
         for i in range(self.resolution[0]):
             for j in range(self.resolution[1]):
                 for k in range(self.resolution[2]):
-                    total_force = np.array(external_force, dtype="float64")
+                    total_force = external_force
                     self.velocity[i][j][k] += total_force * dt
 
     def enforce_boundaries(self):
-        #TODO: Enforing boundary conditions so that particles arent projected out of the domain
-        pass
+        for i in range(self.resolution[0]):
+            for j in range(self.resolution[1]):
+                for k in range(self.resolution[2]):
+                    if (i-1 < 0 or i+1 >= self.resolution[0]):
+                        self.velocity[i][j][k][0] = 0
+
+                    if (j-1 < 0 or j+1 >= self.resolution[1]):
+                        self.velocity[i][j][k][1] = 0
+
+                    if (k-1 < 0 or k+1 >= self.resolution[2]):
+                        self.velocity[i][j][k][2] = 0
 
     def solve_poisson(self):
+        cell_velocity = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
         #TODO: Solve the poisson equation to make the fluid non-divergent.
-        pass
+
+        pressure_gradient = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
+
+        for i in range(self.resolution[0]):
+            for j in range(self.resolution[1]):
+                for k in range(self.resolution[2]):
+                    cell_velocity[i][j][k] = (self.velocity[i][j][k] + self.velocity[i+1][j+1][k+1]) / self.cell_size
+                    #self.velocity[i][j][k] -= pressure_gradient
+
+        for i in range(self.resolution[0]):
+            for j in range(self.resolution[1]):
+                for k in range(self.resolution[2]):
+                        
 
     def to_particles(self, source, points, dt, damping, flipFac):
         bbox = cmds.exactWorldBoundingBox(source + "_domain")
@@ -595,6 +634,7 @@ class MFS_Grid():
         return (velocity, weight)
   
     def clear(self):
+        self.pressure = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
         self.velocity = np.zeros((self.resolution[0] + 1, self.resolution[1] + 1, self.resolution[2] + 1, 3), dtype="float64")
 
 # Create and initialize the plugin.
