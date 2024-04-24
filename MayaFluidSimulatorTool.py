@@ -104,7 +104,7 @@ class MFS_Plugin():
         
         cmds.rowLayout(numberOfColumns=2)
         self.time_ctrl = cmds.intFieldGrp(numberOfFields=2, value1=0, value2=120, label="Frame Range")
-        self.ts_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.01, field=True, label="Time Scale")
+        self.ts_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.1, field=True, label="Time Scale")
         
 
         solve_row = cmds.rowLayout(numberOfColumns=2, parent=simulate_section, adjustableColumn = True)
@@ -222,11 +222,11 @@ class MFS_Plugin():
                 particles = np.append(particles, particle)
 
             # Using the size of the domain and its subdivisions, a cell_size can be constructed to be used for simulating.
-            scale = np.array(cmds.xform(source + "_domain", query=True, scale=True))
-            sizex = cmds.polyCube(source + "_domain", query=True, width=True)
-            sizey = cmds.polyCube(source + "_domain", query=True, height=True)
-            sizez = cmds.polyCube(source + "_domain", query=True, depth=True)
-            size = np.array([sizex, sizey, sizez]) * scale
+            bbox = cmds.exactWorldBoundingBox(source + "_domain")
+            min_x, min_y, min_z, max_x, max_y, max_z = bbox
+
+            size = np.array([abs(max_x - min_x), abs(max_y - min_y), abs(max_z - min_z)])
+            
 
             resx = int(cmds.polyCube(source + "_domain", query=True, subdivisionsX=True))
             resy = int(cmds.polyCube(source + "_domain", query=True, subdivisionsY=True))
@@ -530,20 +530,33 @@ class MFS_Particle():
             min_z <= advected[2] <= max_z):
             self.position = advected
         else:
-            if advected[0] < min_x or advected[0] > max_x:
+            if advected[0] < min_x:
+                self.position[0] = min_x
                 self.velocity[0] = -self.velocity[0]
 
+            
+            if advected[0] > max_x:
+                self.position[0] = max_x
+                self.velocity[0] = -self.velocity[0]
+
+
             if advected[1] > max_y:
+                self.position[1] = min_y
                 self.velocity[1] = -self.velocity[1]
                 
-            if advected[2] < min_z or advected[2] > max_z:
+            if advected[2] < min_z:
+                self.position[2] = min_z
+                self.velocity[2] = -self.velocity[2] 
+
+                
+            if advected[2] > max_z:
+                self.position[2] = max_z
                 self.velocity[2] = -self.velocity[2] 
 
             #TODO: When reflecting the velocity, the particles seem to repeatdly move up slowly and then snap down. This is likely due to the code not conserving momentum properly.
             if advected[1] < min_y:
+                self.position[1] = min_y
                 self.velocity[1] = -self.velocity[1] * damping
-                
-            self.position += self.velocity
 
 
 
@@ -602,7 +615,7 @@ class MFS_Grid():
         # Iterate through the particles
         for p in particles:
             # Map the point from worldspace to grid space
-            current = self.particle_to_grid(p, bbox)
+            current = self.particle_to_grid(p, bbox) - np.array([0.5, 0.5, 0.5])
 
             # Get the trilinear weights
             w000, w100, w010, w110, w001, w101, w011, w111, i, j, k = self.get_trilinear_weights(current)
@@ -692,9 +705,7 @@ class MFS_Grid():
         timestep = timescale
 
         if (max_vel > 0):
-            timestep = max(timestep, timescale * max(np.linalg.norm(self.cell_size) / max_vel, 1))
-
-        print(timestep)
+            timestep = max(timestep, timescale * min(np.linalg.norm(self.cell_size) / max_vel, 1))
 
         return timestep
 
@@ -749,7 +760,6 @@ class MFS_Grid():
     '''compute_divergence finds the divergence of the velocity field.'''
     def compute_divergence(self, scalar):
         divergence = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
-        # Find the velocity divergence
         for i in range(self.resolution[0]):
             for j in range(self.resolution[1]):
                 for k in range(self.resolution[2]):
@@ -790,10 +800,12 @@ class MFS_Grid():
         # iterate through the particles
         for p in particles:
             # Map the point from worldspace to grid space
-            current = self.particle_to_grid(p, bbox)
+            current = self.particle_to_grid(p, bbox) - np.array([0.5, 0.5, 0.5])
 
             # backward trace the particle and obtain its location in grid space
             last = current - p.velocity * dt / self.cell_size
+
+            last = np.clip(last, [0, 0, 0], [self.resolution[0] - 1, self.resolution[1] - 1, self.resolution[2] - 1])
 
             # find the velocities at both current and last
             velocity = self.trilinear_interpolate_velocity(self.velocity_u, self.velocity_v, self.velocity_w, current)
