@@ -8,3 +8,7 @@ https://cg.informatik.uni-freiburg.de/intern/seminar/gridFluids_fluid-EulerParti
 https://www.danenglesson.com/images/portfolio/FLIP/rapport.pdf
 http://graphics.cs.cmu.edu/nsp/course/15464-s20/www/lectures/BasicFluids.pdf
 
+https://www.youtube.com/watch?v=qsYE1wMEMPA
+https://www.youtube.com/watch?v=rSKMYc1CQHE
+https://youtu.be/XmzBREkK8kY
+
