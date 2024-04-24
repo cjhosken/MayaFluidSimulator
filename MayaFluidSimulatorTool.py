@@ -74,7 +74,7 @@ class MFS_Plugin():
         cmds.window(title="Maya Fluid Simulator", widthHeight=self.popup_size)
         col = cmds.columnLayout(adjustableColumn=True)
 
-        cmds.image(width=self.popup_width/2, height=self.popup_height/4, image=os.path.join(self.project_path, "icons/MFS_banner.png"))
+        cmds.image(width=self.popup_size[0]/2, height=self.popup_size[1]/4, image=os.path.join(self.project_path, "icons/MFS_banner.png"))
 
         initialize_section = cmds.frameLayout(label='Initialize', collapsable=True, collapse=False, parent=col)
         cmds.columnLayout(adjustableColumn=True, parent=initialize_section)
@@ -600,7 +600,13 @@ class MFS_Grid():
             current = self.particle_to_grid(p, bbox)
 
             # Get the trilinear weights
-            w000, w100, w010, w110, w001, w101, w011, w111, i, j, k = self.get_trilinear_weights(current)
+            w000, w100, w010, w110, w001, w101, w011, w111, ijk = self.get_trilinear_weights(current)
+
+            i = ijk[0]
+            j = ijk[1]
+            k = ijk[2]
+
+            print(ijk)
 
             # Update the velocity grid and weight grid using point velocity and weights.
             self.velocity[i][j][k] += p.velocity * w000
@@ -835,7 +841,11 @@ class MFS_Grid():
     '''
     def trilinear_interpolate_velocity(self, vel, pos):
         # Get the trilinear weights
-        w000, w100, w010, w110, w001, w101, w011, w111, i, j, k = self.get_trilinear_weights(pos)
+        w000, w100, w010, w110, w001, w101, w011, w111, ijk = self.get_trilinear_weights(pos)
+
+        i = ijk[0]
+        j = ijk[1]
+        k = ijk[2]
 
         # Get the velocity
         velocity = (
@@ -863,17 +873,10 @@ class MFS_Grid():
     '''
     def get_trilinear_weights(self, pos):
         # Snap the grid space location to a cell index
-        ijk = np.array([int(pos[0]), int(pos[1]), int(pos[2])], dtype="float64")
+        ijk = np.array([int(pos[0]), int(pos[1]), int(pos[2])], dtype="int64")
 
         # The difference between grid space and snapped grid space is used for trilinear interpolation
         dc = pos - ijk
-
-        # Clamp indices to stay within the grid boundaries.
-        # We do this after to avoid screwing with the weighting.
-        # TODO: THERE IS A POTENTIAL ERROR WITH NOT CLAMPING THE POSITIONS FROM THE START. CHECK IF THIS CAN BE IGNORED OR NOT
-        i = max(0, min(ijk[0], self.resolution[0] - 1))
-        j = max(0, min(ijk[1], self.resolution[1] - 1))
-        k = max(0, min(ijk[2], self.resolution[2] - 1))
 
         # Calculate the weights for the surround 8 cells
         w000 = (1 - dc[0]) * (1 - dc[1]) * (1 - dc[2])
@@ -886,7 +889,7 @@ class MFS_Grid():
         w111 = dc[0] * dc[1] * dc[2]
 
         # return the weights and the snapped position in grid space.
-        return w000, w100, w010, w110, w001, w101, w011, w111, i, j, k
+        return w000, w100, w010, w110, w001, w101, w011, w111, ijk
     
     '''particle_to_grid converts the particle position from world space to grid space.
 
@@ -900,9 +903,12 @@ class MFS_Grid():
         # the particle positions are first transformed by moving the world so that the minimum bound of the domain is at (0,0,0). 
         # This then makes obtaining the index by dividing by cell_size much easier.
 
-        u = (particle.position[0] - min_x) / self.cell_size[0]
-        v = (particle.position[1] - min_y) / self.cell_size[1]
-        w = (particle.position[2] - min_z) / self.cell_size[2]
+        # Clamp indices to stay within the grid boundaries.
+        particle_pos = np.clip(particle.position, [min_x, min_y, min_z], [max_x, max_y, max_z])
+
+        u = (particle_pos[0] - min_x) / self.cell_size[0]
+        v = (particle_pos[1] - min_y) / self.cell_size[1]
+        w = (particle_pos[2] - min_z) / self.cell_size[2]
 
         return np.array([u, v, w], dtype="float64")
     
