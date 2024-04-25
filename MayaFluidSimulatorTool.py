@@ -585,6 +585,22 @@ class MFS_Grid():
         # This is due to the velocity components being stored on the "cell borders", which involves half-indexes.
         # More about half-indexing can be found here:
 
+
+        # Create a cell type to store air (0) water (1) and border (2)
+        self.cells_types =  np.zeros((self.resolution[0] + 2, self.resolution[1] + 2, self.resolution[2] + 2), dtype="float64")
+
+        for i in range(self.resolution[0] + 2):
+            self.cells_types[i][0][0] = 2
+            self.cells_types[i][self.resolution[1] - 1][self.resolution[2] - 1] = 2
+        
+        for j in range(self.resolution[1] + 2):
+            self.cells_types[0][j][0] = 2
+            self.cells_types[self.resolution[0] - 1][j][self.resolution[2] - 1] = 2
+
+        for k in range(self.resolution[2] + 2):
+            self.cells_types[0][0][k] = 2
+            self.cells_types[self.resolution[0] - 1][self.resolution[1] - 1][k] = 2
+
         self.velocity_u = np.zeros((self.resolution[0] + 1, self.resolution[1], self.resolution[2]), dtype="float64")
         self.velocity_v = np.zeros((self.resolution[0], self.resolution[1] + 1, self.resolution[2]), dtype="float64")
         self.velocity_w = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2] + 1), dtype="float64")
@@ -612,15 +628,17 @@ class MFS_Grid():
         # In trilinear interpolation, we need to do sum_of_interpolated_velocities / sum_of_weights
         # Therefore, we need to keep track of the total weights in our grid cells
 
-        
+        for p in particles:
+            current = self.particle_to_grid(p, bbox)
+            self.cells_types[int(current[0])][int(current[1])][int(current[2])] = 1
+
         # Iterate through the particles
         for p in particles:
             # Map the point from worldspace to grid space
-            current = self.particle_to_grid(p, bbox) - np.array([0.5, 0.5, 0.5])
+            current = self.particle_to_grid(p, bbox)
 
             # Get the trilinear weights
             w000, w100, w010, w110, w001, w101, w011, w111, i, j, k = self.get_trilinear_weights(current)
-
 
             # Update the velocity grid and weight grid using point velocity and weights.
             self.velocity_u[i][j][k] += p.velocity[0] * w000
@@ -634,17 +652,19 @@ class MFS_Grid():
             self.velocity_v[i][min(j + 1, self.resolution[1] - 1)][k] += p.velocity[1] * w010
             self.weights[i][min(j + 1, self.resolution[1] - 1)][k] += w010
 
-            self.velocity_u[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] += p.velocity[0] * w110
-            self.velocity_v[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] += p.velocity[1] * w110
+            self.velocity_u[min(i + 1, self.resolution[0] - 1)][j][k] += p.velocity[0] * w110
+            self.velocity_v[i][min(j + 1, self.resolution[1] - 1)][k] += p.velocity[1] * w110
             self.weights[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] += w110
 
             self.velocity_w[i][j][min(k + 1, self.resolution[2] - 1)] += p.velocity[2] * w001
             self.weights[i][j][min(k + 1, self.resolution[2] - 1)] += w001
 
             self.velocity_u[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] += p.velocity[0] * w101
+            self.velocity_v[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] += p.velocity[0] * w101
             self.velocity_w[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] += p.velocity[2] * w101
             self.weights[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] += w101
 
+            self.velocity_u[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += p.velocity[0] * w011
             self.velocity_v[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += p.velocity[1] * w011
             self.velocity_w[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += p.velocity[2] * w011
             self.weights[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += w011
@@ -662,7 +682,7 @@ class MFS_Grid():
                         self.velocity_u[i][j][k] /= self.weights[i][j][k]
                         self.velocity_v[i][j][k] /= self.weights[i][j][k]
                         self.velocity_w[i][j][k] /= self.weights[i][j][k]
-
+                        
         # Store the velocity into a last_velocity grid so that we can calculate the change in velocity used in FLIP.
         self.last_velocity_u = np.array(self.velocity_u, copy=True)
         self.last_velocity_v = np.array(self.velocity_v, copy=True)
@@ -684,9 +704,9 @@ class MFS_Grid():
         for i in range(self.resolution[0]):
             for j in range(self.resolution[1]):
                 for k in range(self.resolution[2]):
-                    u_diff = self.velocity_u[i + 1][j][k] - self.velocity_u[i][j][k]
-                    v_diff = self.velocity_v[i][j + 1][k] - self.velocity_v[i][j][k]
-                    w_diff = self.velocity_w[i][j][k + 1] - self.velocity_w[i][j][k]
+                    u_diff = (self.velocity_u[i + 1][j][k] - self.velocity_u[i][j][k]) / self.cell_size[0]
+                    v_diff = (self.velocity_v[i][j + 1][k] - self.velocity_v[i][j][k]) / self.cell_size[1]
+                    w_diff = (self.velocity_w[i][j][k + 1] - self.velocity_w[i][j][k]) / self.cell_size[2]
                     vel = math.sqrt(u_diff**2 + v_diff**2 + w_diff**2)
                     max_vel = max(max_vel, vel)
 
@@ -754,7 +774,7 @@ class MFS_Grid():
                                         self.velocity_u[i + 1][j][k] - self.velocity_u[i][j][k] +
                                         self.velocity_v[i][j + 1][k] - self.velocity_v[i][j][k] +
                                         self.velocity_w[i][j][k + 1] - self.velocity_w[i][j][k]
-                                           ) - stiffness * (self.weights[i][j][k] - rest_density)
+                                           ) #- stiffness * (self.weights[i][j][k] - rest_density)
                     
                     boundary_weights[i][j][k] = (int(self.in_grid(i+1, j, k)) + int(self.in_grid(i-1, j, k)) +
                                                  int(self.in_grid(i, j+1, k)) + int(self.in_grid(i, j-1, k)) +
@@ -780,7 +800,7 @@ class MFS_Grid():
             current = self.particle_to_grid(p, bbox) - np.array([0.5, 0.5, 0.5])
 
             # backward trace the particle and obtain its location in grid space
-            last = current - p.velocity * dt / self.cell_size
+            last = current - p.velocity * dt / self.cell_size  - np.array([0.5, 0.5, 0.5])
 
             last = np.clip(last, [0, 0, 0], [self.resolution[0] - 1, self.resolution[1] - 1, self.resolution[2] - 1])
 
@@ -843,14 +863,14 @@ class MFS_Grid():
         dc = pos - np.array([i, j, k], dtype="int64")
 
         # Calculate the weights for the surround 8 cells
-        w000 = (1 - dc[0]) * (1 - dc[1]) * (1 - dc[2]) * float(self.in_grid(i, j, k))
-        w100 = dc[0] * (1 - dc[1]) * (1 - dc[2]) * float(self.in_grid(i + 1, j, k))
-        w010 = (1 - dc[0]) * dc[1] * (1 - dc[2]) * float(self.in_grid(i, j + 1, k))
-        w110 = dc[0] * dc[1] * (1 - dc[2]) * float(self.in_grid(i+1 , j+1, k))
-        w001 = (1 - dc[0]) * (1 - dc[1]) * dc[2] * float(self.in_grid(i, j, k+1))
-        w101 = dc[0] * (1 - dc[1]) * dc[2] * float(self.in_grid(i+1, j, k+1))
-        w011 = (1 - dc[0]) * dc[1] * dc[2] * float(self.in_grid(i, j+1, k+1))
-        w111 = dc[0] * dc[1] * dc[2] * float(self.in_grid(i+1, j+1, k+1))
+        w000 = (1 - dc[0]) * (1 - dc[1]) * (1 - dc[2]) * float(self.is_water(i, j, k))
+        w100 = dc[0] * (1 - dc[1]) * (1 - dc[2]) * float(self.is_water(i + 1, j, k))
+        w010 = (1 - dc[0]) * dc[1] * (1 - dc[2]) * float(self.is_water(i, j + 1, k))
+        w110 = dc[0] * dc[1] * (1 - dc[2]) * float(self.is_water(i+1 , j+1, k))
+        w001 = (1 - dc[0]) * (1 - dc[1]) * dc[2] * float(self.is_water(i, j, k+1))
+        w101 = dc[0] * (1 - dc[1]) * dc[2] * float(self.is_water(i+1, j, k+1))
+        w011 = (1 - dc[0]) * dc[1] * dc[2] * float(self.is_water(i, j+1, k+1))
+        w111 = dc[0] * dc[1] * dc[2] * float(self.is_water(i+1, j+1, k+1))
 
         # return the weights and the snapped position in grid space.
         return w000, w100, w010, w110, w001, w101, w011, w111, i, j, k
@@ -879,6 +899,9 @@ class MFS_Grid():
                 0 <= j < self.resolution[1] and \
                 0 <= k < self.resolution[2])
 
+    def is_water(self, i, j, k):
+        return self.in_grid(i, j, k) and self.cells_types[i+1][j+1][k+1] == 1
+
     '''clear resets the velocity grid.'''
     def clear(self):
         self.velocity_u = np.zeros((self.resolution[0] + 1, self.resolution[1], self.resolution[2]), dtype="float64")
@@ -886,6 +909,12 @@ class MFS_Grid():
         self.velocity_w = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2] + 1), dtype="float64")
 
         self.weights = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
+
+        for i in range(1, self.resolution[0] + 1):
+            for j in range(1, self.resolution[1] + 1):
+                for k in range(1, self.resolution[2] + 1):
+                    self.cells_types[i][j][k] = 0
+
 
 
 # Create and initialize the plugin.
