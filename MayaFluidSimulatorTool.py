@@ -563,6 +563,10 @@ class MFS_Grid():
         self.clear()
 
     def particles_to_grid(self, particles, bbox):
+        for p in particles:
+            x, y, z, i, j, k = self.get_grid_coords(box, p.position)
+            self.type[i][j][k] = 1
+        
         weights = np.zeros((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1), dtype="float64")
 
         for p in particles:
