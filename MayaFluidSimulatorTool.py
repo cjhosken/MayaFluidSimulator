@@ -555,18 +555,14 @@ class MFS_Grid():
         self.resolution = resolution
         self.cell_size = cell_size
 
-        self.velocity = np.zeros((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1, 3), dtype="float64")
-        self.last_velocity = np.zeros((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1, 3), dtype="float64")
+        self.velocity = np.empty((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1, 3), dtype="float64")
+        self.last_velocity = np.empty((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1, 3), dtype="float64")
         self.pressure = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
         self.type = np.full((self.resolution[0] + 2, self.resolution[1] + 2, self.resolution[2] + 2), 2, dtype="int64")
         
         self.clear()
 
-    def particles_to_grid(self, particles, bbox):
-        for p in particles:
-            x, y, z, i, j, k = self.get_grid_coords(box, p.position)
-            self.type[i][j][k] = 1
-        
+    def particles_to_grid(self, particles, bbox):        
         weights = np.zeros((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1), dtype="float64")
 
         for p in particles:
@@ -577,26 +573,26 @@ class MFS_Grid():
             self.velocity[i][j][k] += p.velocity * w000
             weights[i][j][k] += w000
 
-            self.velocity[min(i + 1, self.resolution[0] - 1)][j][k] += p.velocity * w100
-            weights[min(i + 1, self.resolution[0] - 1)][j][k] += w100
+            self.velocity[min(i + 1, self.resolution[0])][j][k] += p.velocity * w100
+            weights[min(i + 1, self.resolution[0])][j][k] += w100
 
-            self.velocity[i][min(j + 1, self.resolution[1] - 1)][k] += p.velocity * w010
-            weights[i][min(j + 1, self.resolution[1] - 1)][k] += w010
+            self.velocity[i][min(j + 1, self.resolution[1])][k] += p.velocity * w010
+            weights[i][min(j + 1, self.resolution[1])][k] += w010
 
-            self.velocity[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] += p.velocity * w110
-            weights[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] += w110
+            self.velocity[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][k] += p.velocity * w110
+            weights[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][k] += w110
 
-            self.velocity[i][j][min(k + 1, self.resolution[2] - 1)] += p.velocity * w001
-            weights[i][j][min(k + 1, self.resolution[2] - 1)] += w001
+            self.velocity[i][j][min(k + 1, self.resolution[2])] += p.velocity * w001
+            weights[i][j][min(k + 1, self.resolution[2])] += w001
 
-            self.velocity[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += p.velocity * w011
-            weights[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += w011
+            self.velocity[i][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] += p.velocity * w011
+            weights[i][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] += w011
 
-            self.velocity[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] += p.velocity * w101
-            weights[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] += w101
+            self.velocity[min(i + 1, self.resolution[0])][j][min(k + 1, self.resolution[2])] += p.velocity * w101
+            weights[min(i + 1, self.resolution[0])][j][min(k + 1, self.resolution[2])] += w101
 
-            self.velocity[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += p.velocity * w111
-            weights[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += w111
+            self.velocity[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] += p.velocity * w111
+            weights[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] += w111
 
         for u in range(self.resolution[0] + 1):
             for v in range(self.resolution[1] + 1):
@@ -611,14 +607,14 @@ class MFS_Grid():
         dy = y - j
         dz = z - k
 
-        w000 = (1 - dx) * (1 - dy) * (1 - dz) * self.is_fluid_cell(i, j, k)
-        w100 = (dx) * (1 - dy) * (1 - dz) * self.is_fluid_cell(i + 1, j, k)
-        w010 = (1 - dx) * (dy) * (1 - dz) * self.is_fluid_cell(i, j + 1, k)
-        w110 = (dx) * (dy) * (1 - dz) * self.is_fluid_cell(i + 1, j + 1, k)
-        w001 = (1 - dx) * (1 - dy) * (dz) * self.is_fluid_cell(i, j, k + 1)
-        w011 = (1 - dx) * (dy) * (dz) * self.is_fluid_cell(i, j + 1, k + 1)
-        w101 = (dx) * (1 - dy) * (dz) * self.is_fluid_cell(i + 1, j, k + 1)
-        w111 = (dx) * (dy) * (dz) * self.is_fluid_cell(i + 1, j + 1, k + 1)
+        w000 = (1 - dx) * (1 - dy) * (1 - dz) * self.is_not_border_cell(i, j, k)
+        w100 = (dx) * (1 - dy) * (1 - dz) * self.is_not_border_cell(i + 1, j, k)
+        w010 = (1 - dx) * (dy) * (1 - dz) * self.is_not_border_cell(i, j + 1, k)
+        w110 = (dx) * (dy) * (1 - dz) * self.is_not_border_cell(i + 1, j + 1, k)
+        w001 = (1 - dx) * (1 - dy) * (dz) * self.is_not_border_cell(i, j, k + 1)
+        w011 = (1 - dx) * (dy) * (dz) * self.is_not_border_cell(i, j + 1, k + 1)
+        w101 = (dx) * (1 - dy) * (dz) * self.is_not_border_cell(i + 1, j, k + 1)
+        w111 = (dx) * (dy) * (dz) * self.is_not_border_cell(i + 1, j + 1, k + 1)
     
         return w000, w100, w010, w110, w001, w011, w101, w111
 
@@ -636,7 +632,7 @@ class MFS_Grid():
         dt = timescale
 
         if (max_vel > 0):
-            dt = timescale * min(h / max_vel, 1)
+            dt = timescale * max(min(h / max_vel, 1), timescale/4)
 
         return dt
 
@@ -649,14 +645,17 @@ class MFS_Grid():
             total_weight = w000 + w100 + w010 + w110 + w001 + w011 + w101 + w111
 
             current_velocity = (
-                self.velocity[min(i + 1, self.resolution[0] - 1)][j][k] * w100 + 
-                self.velocity[i][min(j + 1, self.resolution[1] - 1)][k] * w010 +
-                self.velocity[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] * w110 +
-                self.velocity[i][j][min(k + 1, self.resolution[2] - 1)] * w001 + 
-                self.velocity[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] * w011 +
-                self.velocity[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] * w101 +
-                self.velocity[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] * w111
+                self.velocity[i][j][k] * w000 + 
+                self.velocity[min(i + 1, self.resolution[0])][j][k] * w100 + 
+                self.velocity[i][min(j + 1, self.resolution[1])][k] * w010 +
+                self.velocity[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][k] * w110 +
+                self.velocity[i][j][min(k + 1, self.resolution[2])] * w001 + 
+                self.velocity[i][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] * w011 +
+                self.velocity[min(i + 1, self.resolution[0])][j][min(k + 1, self.resolution[2])] * w101 +
+                self.velocity[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] * w111
             )
+
+            current_velocity = np.nan_to_num(current_velocity, nan=0)
 
             if (total_weight > 0):
                 current_velocity /= total_weight
@@ -667,15 +666,22 @@ class MFS_Grid():
 
             total_weight = w000 + w100 + w010 + w110 + w001 + w011 + w101 + w111
 
+            i = max(0, min(0, self.resolution[0]))
+            j = max(0, min(0, self.resolution[1]))
+            k = max(0, min(0, self.resolution[2]))
+
             last_velocity = (
-                self.last_velocity[min(i + 1, self.resolution[0] - 1)][j][k] * w100 + 
-                self.last_velocity[i][min(j + 1, self.resolution[1] - 1)][k] * w010 +
-                self.last_velocity[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] * w110 +
-                self.last_velocity[i][j][min(k + 1, self.resolution[2] - 1)] * w001 + 
-                self.last_velocity[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] * w011 +
-                self.last_velocity[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] * w101 +
-                self.last_velocity[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] * w111
+                self.last_velocity[i][j][k] * w000 + 
+                self.last_velocity[min(i + 1, self.resolution[0])][j][k] * w100 + 
+                self.last_velocity[i][min(j + 1, self.resolution[1])][k] * w010 +
+                self.last_velocity[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][k] * w110 +
+                self.last_velocity[i][j][min(k + 1, self.resolution[2])] * w001 + 
+                self.last_velocity[i][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] * w011 +
+                self.last_velocity[min(i + 1, self.resolution[0])][j][min(k + 1, self.resolution[2])] * w101 +
+                self.last_velocity[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] * w111
             )
+
+            last_velocity = np.nan_to_num(last_velocity, nan=0)
 
             if (total_weight > 0):
                 last_velocity /= total_weight
@@ -684,12 +690,12 @@ class MFS_Grid():
 
             
 
-    def is_fluid_cell(self, i, j, k):
+    def is_not_border_cell(self, i, j, k):
         return float(
             0 <= i < self.resolution[0] and \
             0 <= j < self.resolution[1] and \
             0 <= k < self.resolution[2] and \
-            self.type[i+1][j+1][k+1] == 1
+            self.type[i+1][j+1][k+1] != 2
         )
     
     def get_grid_coords(self, bbox, position):
@@ -698,20 +704,25 @@ class MFS_Grid():
         y = ((position[1] - min_y) / self.cell_size[1]) - (self.cell_size[1] / 2)
         z = ((position[2] - min_z) / self.cell_size[2]) - (self.cell_size[2] / 2)
 
+        x = np.nan_to_num(x, nan=0)
+        y = np.nan_to_num(y, nan=0)
+        z = np.nan_to_num(z, nan=0)
+
         i = int(x)
         j = int(y)
         k = int(z)
 
+
         return x, y, z, i, j, k
 
     def clear(self):
-        self.velocity = np.zeros((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1, 3), dtype="float64")
+        self.velocity = np.empty((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1, 3), dtype="float64")
         self.pressure = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
 
-        for i in range(1, self.resolution[0]):
-            for j in range(1, self.resolution[1]):
-                for k in range(1, self.resolution[2]):
-                    self.type[i][j][k] == 0
+        for i in range(1, self.resolution[0]+1):
+            for j in range(1, self.resolution[1]+1):
+                for k in range(1, self.resolution[2]+1):
+                    self.type[i][j][k] = 0
 
 
 # Create and initialize the plugin.
