@@ -25,8 +25,6 @@ import math
 '''
 
 import numpy as np
-from scipy.sparse.linalg import spsolve
-from scipy.sparse import csr_matrix
 
 ''' The MFS Plugin is a general class that contains the (mainly) Maya side of the script. This allows the use of "global" variables in a contained setting. '''
 class MFS_Plugin():
@@ -97,8 +95,9 @@ class MFS_Plugin():
         self.vel_ctrl = cmds.floatFieldGrp( numberOfFields=3, label='Initial Velocity', extraLabel='cm', value1=0, value2=0, value3=0 )
 
         self.density_ctrl = cmds.floatSliderGrp(minValue=0, maxValue=2000, step=0.01, value=998.2, field=True, label="Fluid Density")
-        self.visc_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.1, field=True, label="Viscosity Factor")
-        self.damp_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.9, maxValue=1, field=True, label="Floor Damping")
+        self.stiff_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=1, field=True, label="Stiffness")
+        self.relax_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=1.5, field=True, label="Overrelaxation")
+        self.iter_ctrl = cmds.intSliderGrp(minValue=0, value=5, field=True, label="Iterations")
 
         self.picflip_ctrl = cmds.floatSliderGrp(minValue=0, maxValue=1.0, step=0.01, value=0.5, field=True, label="PIC/FLIP Mix")
         
@@ -198,10 +197,11 @@ class MFS_Plugin():
             external_force = cmds.floatFieldGrp(self.force_ctrl, query=True, value=True)
 
             fluid_density = cmds.floatSliderGrp(self.density_ctrl, query=True, value=True)
-            viscosity_factor = cmds.floatSliderGrp(self.visc_ctrl, query=True, value=True)
-            damping =  (1 - cmds.floatSliderGrp(self.damp_ctrl, query=True, value=True))
             pscale = cmds.floatSliderGrp(self.pscale_ctrl, query=True, value=True)
             flipFac = cmds.floatSliderGrp(self.picflip_ctrl, query=True, value=True)
+            iterations = cmds.intSliderGrp(self.iter_ctrl, query=True, value=True)
+            overrelaxation = cmds.floatSliderGrp(self.relax_ctrl, query=True, value=True)
+            stiffness = cmds.floatSliderGrp(self.stiff_ctrl, query=True, value=True)
 
             maya_particles = cmds.listRelatives(source + "_particles", children=True) or []
             particles = []
@@ -243,7 +243,7 @@ class MFS_Plugin():
             cmds.progressWindow(title='Simulating', progress=0, status='Progress: 0%', isInterruptable=True, maxValue=(frame_range[1]-frame_range[0]))
             
             # The simulation is then properly started in update.
-            self.update(source, particles, grid, frame_range, timescale, external_force, fluid_density, viscosity_factor, damping, pscale, flipFac, 0)
+            self.update(source, particles, grid, frame_range, timescale, external_force, fluid_density, pscale, flipFac, iterations, overrelaxation, stiffness, 0)
 
 
     ''' update is the start of an actual Fluid Simulator. It simulates the particle position frame by frame, keyframing the positions each time. 
@@ -264,7 +264,7 @@ class MFS_Plugin():
 
         The reason why so many values are being parsed through the update function is to avoid settings changing midway though simulation.
     '''
-    def update(self, source, particles, grid, frame_range, timescale, external_force, fluid_density, viscosity_factor, damping, pscale, flipFac, progress):
+    def update(self, source, particles, grid, frame_range, timescale, external_force, fluid_density, pscale, flipFac, iterations, overrelaxation, stiffness, progress):
         percent = (progress / (frame_range[1] - frame_range[0])) * 100
 
         cmds.progressWindow(e=1, progress=progress, status=f'Progress: {percent:.1f}%')
@@ -297,11 +297,12 @@ class MFS_Plugin():
             cfl = 0
 
             while(cfl < timescale):
-                grid.particles_to_grid(particles, bbox)
+                grid.particles_to_grid(particles, bbox, fluid_density)
                 dt = grid.calc_timestep(timescale, external_force)
                 grid.apply_forces(external_force, dt)
-                grid.grid_to_particles(particles, bbox, damping, flipFac, dt)
-                grid.collide_particles(particles, bbox, pscale)
+                grid.solve_divergence(iterations, overrelaxation, stiffness, fluid_density)
+                grid.grid_to_particles(particles, bbox, flipFac, dt)
+                #grid.collide_particles(particles, bbox, pscale)
                 grid.clear()
 
                 cfl += dt            
@@ -309,7 +310,7 @@ class MFS_Plugin():
             
             cmds.currentTime(t + 1, edit=True)
 
-            self.update(source, particles, grid, frame_range, timescale, external_force, fluid_density, viscosity_factor, damping, pscale, flipFac, progress=progress+1)
+            self.update(source, particles, grid, frame_range, timescale, external_force, fluid_density, pscale, flipFac, iterations, overrelaxation, stiffness, progress=progress+1)
         else:
             cmds.currentTime(frame_range[0], edit=True)
             cmds.progressWindow(endProgress=1)
@@ -509,7 +510,7 @@ class MFS_Particle():
         flipFac         : The blending from PIC (0) -> (1) FLIP. 
 
     '''
-    def advect(self, current_velocity, last_velocity, flipFac, bbox, damping, dt):
+    def advect(self, current_velocity, last_velocity, flipFac, bbox, dt):
         # Update velocity based on interpolated grid velocity
         pic = current_velocity
         flip = self.velocity + (current_velocity - last_velocity)
@@ -517,11 +518,13 @@ class MFS_Particle():
 
         advected = self.position + self.velocity * dt
 
-        self.handle_boundaries(bbox, damping, advected)
+        self.handle_boundaries(bbox, advected)
 
-    def handle_boundaries(self, bbox, damping, advected):
+    def handle_boundaries(self, bbox, advected):
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
         # Advect particle position
+
+        damp = 0
 
         # Check if advected position is within the bounding box
         if (min_x <= advected[0] <= max_x and
@@ -531,15 +534,15 @@ class MFS_Particle():
         else:
             # Handle boundary reflections
             if advected[0] < min_x or advected[0] > max_x:
-                self.velocity[0] *= -1  # Reflect velocity component
+                self.velocity[0] *= -damp  # Reflect velocity component
                 self.position[0] = min(max(min_x, advected[0]), max_x)  # Clamp position
 
-            if advected[1] < min_y or advected[1] > max_y:
-                self.velocity[1] *= -damping  # Dampen velocity component
+            if advected[1] < min_y or advected[1] > max_y:    
+                self.velocity[1] *= -damp         
                 self.position[1] = min(max(min_y, advected[1]), max_y)  # Clamp position
 
             if advected[2] < min_z or advected[2] > max_z:
-                self.velocity[2] *= -1  # Reflect velocity component
+                self.velocity[2] *= -damp  # Reflect velocity component
                 self.position[2] = min(max(min_z, advected[2]), max_z)  # Clamp position
         
         
@@ -563,12 +566,12 @@ class MFS_Grid():
 
         self.velocity = np.zeros((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1, 3), dtype="float64")
         self.last_velocity = np.zeros((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1, 3), dtype="float64")
-        self.pressure = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
-        self.type = np.full((self.resolution[0] + 2, self.resolution[1] + 2, self.resolution[2] + 2), 2, dtype="int64")
+        self.density = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
+        self.type = np.zeros((self.resolution[0] + 2, self.resolution[1] + 2, self.resolution[2] + 2), dtype="int64")
         
         self.clear()
 
-    def particles_to_grid(self, particles, bbox):        
+    def particles_to_grid(self, particles, bbox, rest_density):        
         weights = np.zeros((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1), dtype="float64")
 
         for p in particles:
@@ -605,6 +608,11 @@ class MFS_Grid():
                 for w in range(self.resolution[2] + 1):
                     if (weights[u][v][w] > 0):
                         self.velocity[u][v][w] /= weights[u][v][w]
+        
+        for i in range(self.resolution[0]):
+            for j in range(self.resolution[1]):
+                for k in range(self.resolution[2]):
+                    self.density[i][j][k] = (weights[i][j][k] + weights[i+1][j+1][k+1]) / (2*np.linalg.norm(self.cell_size)) * rest_density
         
         self.last_velocity = np.array(self.velocity, copy=True)
 
@@ -651,7 +659,45 @@ class MFS_Grid():
                 for w in range(self.resolution[2] + 1):
                     self.velocity[u][v][w] += external_force * dt
 
-    def grid_to_particles(self, particles, bbox, damping, flipFac, dt):
+    def solve_divergence(self, iterations, overrelaxation, stiffness, rest_density):
+        for n in range(iterations):
+            divergence = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
+            borders = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="int64")
+
+            for i in range(self.resolution[0]):
+                for j in range(self.resolution[1]):
+                    for k in range(self.resolution[2]):
+                        divergence[i][j][k] = overrelaxation * (
+                            self.velocity[i+1][j][k][0] - self.velocity[i][j][k][0] +
+                            self.velocity[i][j+1][k][1] - self.velocity[i][j][k][1] +
+                            self.velocity[i][j][k+1][2] - self.velocity[i][j][k][2]
+                        ) 
+                        #- stiffness * (self.density[i][j][k] - rest_density)
+
+                        borders[i][j][k] = (
+                            self.type[i][j+1][k+1] + 
+                            self.type[i+2][j+1][k+1] +
+                            self.type[i+1][j][k+1] +
+                            self.type[i+1][j+2][k+1] +
+                            self.type[i+1][j+1][k] +
+                            self.type[i+1][j+1][k+2]
+                        )
+            
+            for i in range(self.resolution[0]):
+                for j in range(self.resolution[1]):
+                    for k in range(self.resolution[2]):
+                        self.velocity[i][j][k][0] += divergence[i][j][k] * self.type[i][j+1][k+1]/borders[i][j][k]
+                        self.velocity[i+1][j][k][0] -= divergence[i][j][k] * self.type[i+2][j+1][k+1]/borders[i][j][k]
+
+                        self.velocity[i][j][k][1] += divergence[i][j][k] * self.type[i+1][j][k+1]/borders[i][j][k]
+                        self.velocity[i][j+1][k][1] -= divergence[i][j][k] * self.type[i+1][j+2][k+1]/borders[i][j][k]
+
+                        self.velocity[i][j][k][2] += divergence[i][j][k] * self.type[i+1][j+1][k]/borders[i][j][k]
+                        self.velocity[i][j][k+1][2] -= divergence[i][j][k] * self.type[i+1][j+1][k+2]/borders[i][j][k]
+
+
+
+    def grid_to_particles(self, particles, bbox, flipFac, dt):
         for p in particles:
             x, y, z, i, j, k = self.get_grid_coords(bbox, p.position)
 
@@ -697,9 +743,10 @@ class MFS_Grid():
             if (total_weight > 0):
                 last_velocity /= total_weight
 
-            p.advect(current_velocity, last_velocity, flipFac, bbox, damping, dt)
+            p.advect(current_velocity, last_velocity, flipFac, bbox, dt)
 
     def collide_particles(self, particles, bbox, pscale):
+        min_x, min_y, min_z, max_x, max_y, max_z = bbox
         stored_particles = {}
 
         for op in particles:
@@ -717,19 +764,35 @@ class MFS_Grid():
                         dist = np.linalg.norm(o.position - p.position)
 
                         if (dist < pscale * 2):
-                            print("COLLIDE")
 
                             separation_vector = (o.position - p.position)
                             
                             if (dist > 0):
                                 separation_vector /= dist
 
-                            p.position -= separation_vector * (pscale - dist) / 2
-                            o.position += separation_vector * (pscale - dist) / 2
-
                             total_mass = p.mass + o.mass
                             p.velocity = ((p.mass - o.mass) / total_mass) * p.velocity + ((2 * o.mass) / total_mass) * o.velocity
                             o.velocity = ((2 * p.mass) / total_mass) * p.velocity + ((o.mass - p.mass) / total_mass) * o.velocity
+
+                            p.position -= separation_vector * (pscale - dist) / 2
+                            o.position += separation_vector * (pscale - dist) / 2
+
+
+                            # Update positions and velocities in the particles array
+                        for particle in particles:
+                            if particle.id == p.id:
+                                particle.position = p.position
+                                particle.velocity = p.velocity
+                            elif particle.id == o.id:
+                                particle.position = o.position
+                                particle.velocity = o.velocity
+
+                        # Handling boundary conditions
+                        for particle in particles:
+                            particle.position[0] = min(max_x, max(min_x, particle.position[0]))
+                            particle.position[1] = min(max_y, max(min_y, particle.position[1]))
+                            particle.position[2] = min(max_z, max(min_z, particle.position[2]))
+                            
             
 
     def is_not_border_cell(self, i, j, k):
@@ -737,7 +800,7 @@ class MFS_Grid():
             0 <= i < self.resolution[0] and \
             0 <= j < self.resolution[1] and \
             0 <= k < self.resolution[2] and \
-            self.type[i+1][j+1][k+1] != 2
+            self.type[i+1][j+1][k+1] != 0
         )
     
     def get_grid_coords(self, bbox, position):
@@ -754,12 +817,12 @@ class MFS_Grid():
 
     def clear(self):
         self.velocity = np.zeros((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1, 3), dtype="float64")
-        self.pressure = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
+        self.density = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
 
         for i in range(1, self.resolution[0]+1):
             for j in range(1, self.resolution[1]+1):
                 for k in range(1, self.resolution[2]+1):
-                    self.type[i][j][k] = 0
+                    self.type[i][j][k] = 1
 
 
 # Create and initialize the plugin.
