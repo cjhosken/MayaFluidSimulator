@@ -496,6 +496,7 @@ class MFS_Particle():
         self.id = id
         self.position = pos
         self.velocity = vel
+        self.mass = 0.1
 
 
     ''' advect takes the interpolated velocity from the grid and adds it to the particle.
@@ -700,9 +701,8 @@ class MFS_Grid():
 
     def collide_particles(self, particles, bbox, pscale):
         stored_particles = {}
-        old_particles = np.array(particles, copy=True)
 
-        for op in old_particles:
+        for op in particles:
             x, y, z, i, j, k = self.get_grid_coords(bbox, op.position)
             if (i, j, k) not in stored_particles:
                 stored_particles[(i, j, k)] = []
@@ -716,8 +716,20 @@ class MFS_Grid():
                     if (o.id != p.id):
                         dist = np.linalg.norm(o.position - p.position)
 
-                        if (dist < pscale):
+                        if (dist < pscale * 2):
                             print("COLLIDE")
+
+                            separation_vector = (o.position - p.position)
+                            
+                            if (dist > 0):
+                                separation_vector /= dist
+
+                            p.position -= separation_vector * (pscale - dist) / 2
+                            o.position += separation_vector * (pscale - dist) / 2
+
+                            total_mass = p.mass + o.mass
+                            p.velocity = ((p.mass - o.mass) / total_mass) * p.velocity + ((2 * o.mass) / total_mass) * o.velocity
+                            o.velocity = ((2 * p.mass) / total_mass) * p.velocity + ((o.mass - p.mass) / total_mass) * o.velocity
             
 
     def is_not_border_cell(self, i, j, k):
