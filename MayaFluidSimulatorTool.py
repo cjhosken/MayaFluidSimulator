@@ -301,6 +301,7 @@ class MFS_Plugin():
                 dt = grid.calc_timestep(timescale, external_force)
                 grid.apply_forces(external_force, dt)
                 grid.grid_to_particles(particles, bbox, damping, flipFac, dt)
+                grid.collide_particles(particles, bbox, pscale)
                 grid.clear()
 
                 cfl += dt            
@@ -508,15 +509,18 @@ class MFS_Particle():
 
     '''
     def advect(self, current_velocity, last_velocity, flipFac, bbox, damping, dt):
-        min_x, min_y, min_z, max_x, max_y, max_z = bbox
-        
         # Update velocity based on interpolated grid velocity
         pic = current_velocity
         flip = self.velocity + (current_velocity - last_velocity)
         self.velocity = flipFac * flip + (1 - flipFac) * pic
 
-        # Advect particle position
         advected = self.position + self.velocity * dt
+
+        self.handle_boundaries(bbox, damping, advected)
+
+    def handle_boundaries(self, bbox, damping, advected):
+        min_x, min_y, min_z, max_x, max_y, max_z = bbox
+        # Advect particle position
 
         # Check if advected position is within the bounding box
         if (min_x <= advected[0] <= max_x and
@@ -694,6 +698,26 @@ class MFS_Grid():
 
             p.advect(current_velocity, last_velocity, flipFac, bbox, damping, dt)
 
+    def collide_particles(self, particles, bbox, pscale):
+        stored_particles = {}
+        old_particles = np.array(particles, copy=True)
+
+        for op in old_particles:
+            x, y, z, i, j, k = self.get_grid_coords(bbox, op.position)
+            if (i, j, k) not in stored_particles:
+                stored_particles[(i, j, k)] = []
+            stored_particles[(i, j, k)].append(op)
+        
+        for coords, cell_particles in stored_particles.items():
+            i, j, k = coords
+
+            for p in cell_particles:
+                for o in cell_particles:
+                    if (o.id != p.id):
+                        dist = np.linalg.norm(o.position - p.position)
+
+                        if (dist < pscale):
+                            print("COLLIDE")
             
 
     def is_not_border_cell(self, i, j, k):
