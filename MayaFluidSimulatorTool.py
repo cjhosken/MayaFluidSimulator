@@ -294,11 +294,12 @@ class MFS_Plugin():
             
             print(f"Maya Fluid Simulator | Simulating Frame: {t}")
 
-            cfl = timescale
+            cfl = 0
 
-            while(cfl < 1):
+            while(cfl < timescale):
                 grid.particles_to_grid(particles, bbox)
                 dt = grid.calc_timestep(timescale, external_force)
+                grid.apply_forces(external_force, dt)
                 grid.grid_to_particles(particles, bbox, damping, flipFac, dt)
                 grid.clear()
 
@@ -555,8 +556,8 @@ class MFS_Grid():
         self.resolution = resolution
         self.cell_size = cell_size
 
-        self.velocity = np.empty((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1, 3), dtype="float64")
-        self.last_velocity = np.empty((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1, 3), dtype="float64")
+        self.velocity = np.zeros((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1, 3), dtype="float64")
+        self.last_velocity = np.zeros((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1, 3), dtype="float64")
         self.pressure = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
         self.type = np.full((self.resolution[0] + 2, self.resolution[1] + 2, self.resolution[2] + 2), 2, dtype="int64")
         
@@ -568,7 +569,7 @@ class MFS_Grid():
         for p in particles:
             x, y, z, i, j, k = self.get_grid_coords(bbox, p.position)
 
-            w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k)
+            w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, False)
 
             self.velocity[i][j][k] += p.velocity * w000
             weights[i][j][k] += w000
@@ -602,7 +603,7 @@ class MFS_Grid():
         
         self.last_velocity = np.array(self.velocity, copy=True)
 
-    def get_trilinear_weights(self, x, y, z, i, j, k):
+    def get_trilinear_weights(self, x, y, z, i, j, k, no_check):
         dx = x - i
         dy = y - j
         dz = z - k
@@ -625,22 +626,31 @@ class MFS_Grid():
         for u in range(self.resolution[0]):
             for v in range(self.resolution[1]):
                 for w in range(self.resolution[2]):
-                    max_vel = max(max_vel, np.linalg.norm((self.velocity[u + 1][v + 1][w + 1] - self.velocity[u][v][w]) / self.cell_size))
+                    velocity_difference = np.linalg.norm(self.velocity[u + 1][v + 1][w + 1] - self.velocity[u][v][w])
+                    max_vel = max(max_vel, velocity_difference)
 
-        max_vel += np.linalg.norm(external_force) * h
+        max_vel /= 2 * h
+
+        max_vel += math.sqrt(np.linalg.norm(external_force) * h)
 
         dt = timescale
 
         if (max_vel > 0):
-            dt = timescale * max(min(h / max_vel, 1), timescale/4)
+            dt *= max(h / max_vel, 1)
 
         return dt
+
+    def apply_forces(self, external_force, dt):
+        for u in range(self.resolution[0] + 1):
+            for v in range(self.resolution[1] + 1):
+                for w in range(self.resolution[2] + 1):
+                    self.velocity[u][v][w] += external_force * dt
 
     def grid_to_particles(self, particles, bbox, damping, flipFac, dt):
         for p in particles:
             x, y, z, i, j, k = self.get_grid_coords(bbox, p.position)
 
-            w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k)
+            w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, False)
 
             total_weight = w000 + w100 + w010 + w110 + w001 + w011 + w101 + w111
 
@@ -655,20 +665,18 @@ class MFS_Grid():
                 self.velocity[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] * w111
             )
 
-            current_velocity = np.nan_to_num(current_velocity, nan=0)
-
             if (total_weight > 0):
                 current_velocity /= total_weight
 
             x, y, z, i, j, k = self.get_grid_coords(bbox, p.position - p.velocity * dt)
 
-            w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k)
+            w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, True)
 
             total_weight = w000 + w100 + w010 + w110 + w001 + w011 + w101 + w111
 
-            i = max(0, min(0, self.resolution[0]))
-            j = max(0, min(0, self.resolution[1]))
-            k = max(0, min(0, self.resolution[2]))
+            i = max(0, min(i, self.resolution[0]))
+            j = max(0, min(j, self.resolution[1]))
+            k = max(0, min(k, self.resolution[2]))
 
             last_velocity = (
                 self.last_velocity[i][j][k] * w000 + 
@@ -680,8 +688,6 @@ class MFS_Grid():
                 self.last_velocity[min(i + 1, self.resolution[0])][j][min(k + 1, self.resolution[2])] * w101 +
                 self.last_velocity[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] * w111
             )
-
-            last_velocity = np.nan_to_num(last_velocity, nan=0)
 
             if (total_weight > 0):
                 last_velocity /= total_weight
@@ -704,19 +710,14 @@ class MFS_Grid():
         y = ((position[1] - min_y) / self.cell_size[1]) - (self.cell_size[1] / 2)
         z = ((position[2] - min_z) / self.cell_size[2]) - (self.cell_size[2] / 2)
 
-        x = np.nan_to_num(x, nan=0)
-        y = np.nan_to_num(y, nan=0)
-        z = np.nan_to_num(z, nan=0)
-
         i = int(x)
         j = int(y)
         k = int(z)
 
-
         return x, y, z, i, j, k
 
     def clear(self):
-        self.velocity = np.empty((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1, 3), dtype="float64")
+        self.velocity = np.zeros((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1, 3), dtype="float64")
         self.pressure = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
 
         for i in range(1, self.resolution[0]+1):
