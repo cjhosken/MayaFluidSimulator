@@ -300,7 +300,7 @@ class MFS_Plugin():
                 grid.particles_to_grid(particles, bbox, fluid_density)
                 dt = grid.calc_timestep(timescale, external_force)
                 grid.apply_forces(external_force, dt)
-                #grid.solve_divergence(iterations, overrelaxation, stiffness, fluid_density)
+                grid.solve_divergence(iterations, overrelaxation, stiffness, fluid_density)
                 grid.grid_to_particles(particles, bbox, flipFac, dt)
                 grid.clear()
 
@@ -737,7 +737,7 @@ class MFS_Grid():
                         self.velocity_v[i][j+1][k] -= divergence[i][j][k] * self.is_not_border(i+1, j+2, k+1)/borders[i][j][k]
 
                         self.velocity_w[i][j][k] += divergence[i][j][k] * self.is_not_border(i+1, j+1, k)/borders[i][j][k]
-                        self.velocity_w[i][j][k+1] -= divergence[i][j][k] * self.is_not_border(i+1, j+1, k)+2/borders[i][j][k]
+                        self.velocity_w[i][j][k+1] -= divergence[i][j][k] * self.is_not_border(i+1, j+1, k+2)/borders[i][j][k]
 
 
 
