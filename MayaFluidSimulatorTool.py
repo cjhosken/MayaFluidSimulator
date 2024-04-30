@@ -297,10 +297,10 @@ class MFS_Plugin():
             cfl = 0
 
             while(cfl < timescale):
-                grid.particles_to_grid(particles, bbox, fluid_density)
+                average_density = grid.particles_to_grid(particles, bbox)
                 dt = grid.calc_timestep(timescale, external_force)
                 grid.apply_forces(external_force, dt)
-                #grid.solve_divergence(iterations, overrelaxation, stiffness, fluid_density)
+                grid.solve_divergence(iterations, overrelaxation, stiffness, average_density)
                 grid.grid_to_particles(particles, bbox, flipFac, dt)
                 grid.clear()
 
@@ -543,8 +543,6 @@ class MFS_Particle():
                 self.position[2] = min(max(min_z, advected[2]), max_z)  # Clamp position
         
         
-        
-
 
 
 ''' The MFS_Grid does most of the calculations for the simulation. Specifically:
@@ -574,12 +572,16 @@ class MFS_Grid():
         
         self.clear()
 
-    def particles_to_grid(self, particles, bbox, rest_density):        
+    def particles_to_grid(self, particles, bbox):        
         weights = np.zeros((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1), dtype="float64")
 
         for p in particles:
-            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position)
+            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, self.cell_size / 2)
             self.type[i+1][j+1][k+1] = 1
+            self.density[i][j][k] += 1
+
+        for p in particles:
+            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, self.cell_size / 2)
 
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k)
 
@@ -640,15 +642,28 @@ class MFS_Grid():
                 for w in range(self.resolution[2] + 1):
                     if (weights[u][v][w] > 0):
                         self.velocity_w[u][v][w] /= weights[u][v][w]
-        
-        for i in range(self.resolution[0]):
-            for j in range(self.resolution[1]):
-                for k in range(self.resolution[2]):
-                    self.density[i][j][k] = (weights[i][j][k] + weights[i+1][j+1][k+1]) / (2*np.linalg.norm(self.cell_size)) * rest_density
-        
+
         self.last_velocity_u = np.array(self.velocity_u, copy=True)
         self.last_velocity_v = np.array(self.velocity_v, copy=True)
         self.last_velocity_w = np.array(self.velocity_w, copy=True)
+        
+        total = 0
+        count = 0
+
+        for i in range(self.resolution[0]):
+            for j in range(self.resolution[1]):
+                for k in range(self.resolution[2]):
+                    if (self.type[i+1][j+1][k+1] == 1):
+                        total += 1
+                        count += self.density[i][j][k]
+
+        count /= total
+
+        return count
+
+        
+                
+        
 
     def get_trilinear_weights(self, x, y, z, i, j, k):
         dx = x - i
@@ -691,27 +706,26 @@ class MFS_Grid():
         for u in range(self.resolution[0] + 1):
             for v in range(self.resolution[1]):
                 for w in range(self.resolution[2]):
-                    self.velocity_u[u][v][w] -= external_force[0] * dt
+                    self.velocity_u[u][v][w] += external_force[0] * dt
 
         for u in range(self.resolution[0]):
             for v in range(self.resolution[1] + 1):
                 for w in range(self.resolution[2]):
-                    self.velocity_v[u][v][w] -= external_force[1] * dt
+                    self.velocity_v[u][v][w] += external_force[1] * dt
 
         for u in range(self.resolution[0]):
             for v in range(self.resolution[1]):
                 for w in range(self.resolution[2] + 1):
-                    self.velocity_w[u][v][w] -= external_force[2] * dt
+                    self.velocity_w[u][v][w] += external_force[2] * dt
 
     def solve_divergence(self, iterations, overrelaxation, stiffness, rest_density):
-        for n in range(iterations):
-            divergence = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
-            borders = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="int64")
+        divergence = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
+        borders = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="int64")
 
+        for n in range(iterations):
             for i in range(self.resolution[0]):
                 for j in range(self.resolution[1]):
                     for k in range(self.resolution[2]):
-
                         divergence[i][j][k] = overrelaxation * (
                             (self.velocity_u[i+1][j][k] - self.velocity_u[i][j][k]) +
                             (self.velocity_v[i][j+1][k] - self.velocity_v[i][j][k]) +
@@ -743,13 +757,17 @@ class MFS_Grid():
 
     def grid_to_particles(self, particles, bbox, flipFac, dt):
         for p in particles:
-            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position)
+            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, self.cell_size / 2)
 
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k)
 
             total_weight = w000 + w100 + w010 + w110 + w001 + w011 + w101 + w111
 
             current_velocity = np.zeros(3)
+
+            i = max(i, 0)
+            j = max(j, 0)
+            k = max(k, 0)
 
             velocity_u = (
                 self.velocity_u[i][j][k] * w000 +
@@ -789,7 +807,7 @@ class MFS_Grid():
             if (total_weight > 0):
                 current_velocity /= total_weight
 
-            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position - p.velocity * dt)
+            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position - p.velocity * dt, self.cell_size / 2)
 
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k)
 
@@ -798,6 +816,8 @@ class MFS_Grid():
             i = max(i, 0)
             j = max(j, 0)
             k = max(k, 0)
+
+            last_velocity = np.zeros(3)
 
             last_velocity_u = (
                 self.last_velocity_u[min(i, self.resolution[0])][min(j, self.resolution[1] - 1)][min(k, self.resolution[2] - 1)] * w000 +
@@ -844,13 +864,13 @@ class MFS_Grid():
             velu[i + 1][j][k] - velu[i][j][k],
             velv[i][j+1][k] - velv[i][j][k],
             velw[i][j][k+1] - velw[i][j][k]
-        ]) / self.cell_size
+        ]) / 2 * self.cell_size
     
     def is_not_border(self, i, j, k):
         return float(
-            0 <= i < self.resolution[0] and \
-            0 <= j < self.resolution[1] and \
-            0 <= k < self.resolution[2] and \
+            0 <= i <= self.resolution[0] and \
+            0 <= j <= self.resolution[1] and \
+            0 <= k <= self.resolution[2] and \
             (self.type[i+1][j+1][k+1] != 2)
         )
 
@@ -862,11 +882,11 @@ class MFS_Grid():
             (self.type[i+1][j+1][k+1] == 1)
         )
     
-    def get_grid_coords(self, bbox, position):
+    def get_grid_coords(self, bbox, position, offset):
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
-        x = ((position[0] - min_x) / self.cell_size[0]) - (self.cell_size[0] / 2)
-        y = ((position[1] - min_y) / self.cell_size[1]) - (self.cell_size[1] / 2)
-        z = ((position[2] - min_z) / self.cell_size[2]) - (self.cell_size[2] / 2)
+        x = ((position[0] - min_x) / self.cell_size[0]) - offset[0]
+        y = ((position[1] - min_y) / self.cell_size[1]) - offset[1]
+        z = ((position[2] - min_z) / self.cell_size[2]) - offset[2]
 
         i = int(x)
         j = int(y)
