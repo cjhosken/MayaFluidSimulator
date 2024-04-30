@@ -511,7 +511,8 @@ class MFS_Particle():
     def advect(self, current_velocity, last_velocity, flipFac, bbox, dt):
         # Update velocity based on interpolated grid velocity
         pic = current_velocity
-        flip = self.velocity + (current_velocity - last_velocity)
+
+        flip = self.velocity + (last_velocity - current_velocity)
         self.velocity = flipFac * flip + (1 - flipFac) * pic
 
         advected = self.position + self.velocity * dt
@@ -522,9 +523,6 @@ class MFS_Particle():
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
         # Advect particle position
 
-        damp = 1
-        damp_2 = 1
-
         # Check if advected position is within the bounding box
         if (min_x <= advected[0] <= max_x and
             min_y <= advected[1] <= max_y and
@@ -533,19 +531,15 @@ class MFS_Particle():
         else:
             # Handle boundary reflections
             if advected[0] < min_x or advected[0] > max_x:
-                self.velocity[0] *= -damp  # Reflect velocity component
+                self.velocity[0] *= -1  # Reflect velocity component
                 self.position[0] = min(max(min_x, advected[0]), max_x)  # Clamp position
 
             if advected[1] < min_y or advected[1] > max_y:    
-                self.velocity[1] *= -damp
-                
-                if (advected[1] < min_y):
-                    self.velocity[1] *= damp_2
-
+                self.velocity[1] *= -1
                 self.position[1] = min(max(min_y, advected[1]), max_y)  # Clamp position
 
             if advected[2] < min_z or advected[2] > max_z:
-                self.velocity[2] *= -damp  # Reflect velocity component
+                self.velocity[2] *= -1  # Reflect velocity component
                 self.position[2] = min(max(min_z, advected[2]), max_z)  # Clamp position
         
         
@@ -630,11 +624,21 @@ class MFS_Grid():
             weights[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] += w111
 
         for u in range(self.resolution[0] + 1):
-            for v in range(self.resolution[1] + 1):
-                for w in range(self.resolution[2] + 1):
+            for v in range(self.resolution[1]):
+                for w in range(self.resolution[2]):
                     if (weights[u][v][w] > 0):
                         self.velocity_u[u][v][w] /= weights[u][v][w]
+
+        for u in range(self.resolution[0]):
+            for v in range(self.resolution[1] + 1):
+                for w in range(self.resolution[2]):
+                    if (weights[u][v][w] > 0):
                         self.velocity_v[u][v][w] /= weights[u][v][w]
+
+        for u in range(self.resolution[0]):
+            for v in range(self.resolution[1]):
+                for w in range(self.resolution[2] + 1):
+                    if (weights[u][v][w] > 0):
                         self.velocity_w[u][v][w] /= weights[u][v][w]
         
         for i in range(self.resolution[0]):
@@ -684,18 +688,20 @@ class MFS_Grid():
         return dt
 
     def apply_forces(self, external_force, dt):
-        for u in range(self.resolution[0]):
+        for u in range(self.resolution[0] + 1):
             for v in range(self.resolution[1]):
                 for w in range(self.resolution[2]):
-                    if (u % 2 == 0 and v % 2 ==0 and w % 2 == 0):
-                        self.velocity_u[u][v][w] += external_force[0] * dt
-                        self.velocity_u[u+1][v][w] += external_force[0] * dt
+                    self.velocity_u[u][v][w] -= external_force[0] * dt
 
-                        self.velocity_v[u][v][w] += external_force[1] * dt
-                        self.velocity_v[u][v+1][w] += external_force[1] * dt
+        for u in range(self.resolution[0]):
+            for v in range(self.resolution[1] + 1):
+                for w in range(self.resolution[2]):
+                    self.velocity_v[u][v][w] -= external_force[1] * dt
 
-                        self.velocity_w[u][v][w] += external_force[2] * dt
-                        self.velocity_w[u][v][w+1] += external_force[2] * dt
+        for u in range(self.resolution[0]):
+            for v in range(self.resolution[1]):
+                for w in range(self.resolution[2] + 1):
+                    self.velocity_w[u][v][w] -= external_force[2] * dt
 
     def solve_divergence(self, iterations, overrelaxation, stiffness, rest_density):
         for n in range(iterations):
@@ -706,18 +712,11 @@ class MFS_Grid():
                 for j in range(self.resolution[1]):
                     for k in range(self.resolution[2]):
 
-                        #print("CELL", self.cell_size)
-                        #print("VELU", self.velocity_u[i][j][k])
-                        #print("VELV", self.velocity_v[i][j][k])
-                        #print("VELW", self.velocity_w[i][j][k])
-
                         divergence[i][j][k] = overrelaxation * (
-                            (self.velocity_u[i+1][j][k] - self.velocity_u[i][j][k]) / self.cell_size[0] +
-                            (self.velocity_v[i][j+1][k] - self.velocity_v[i][j][k]) / self.cell_size[1] +
-                            (self.velocity_w[i][j][k+1] - self.velocity_w[i][j][k]) / self.cell_size[2]
-                        )
-
-                        #- stiffness * (self.density[i][j][k] - rest_density)
+                            (self.velocity_u[i+1][j][k] - self.velocity_u[i][j][k]) +
+                            (self.velocity_v[i][j+1][k] - self.velocity_v[i][j][k]) +
+                            (self.velocity_w[i][j][k+1] - self.velocity_w[i][j][k])
+                        ) - stiffness * (self.density[i][j][k] - rest_density)
 
                         borders[i][j][k] = (
                             self.is_not_border(i, j+1, k+1) + 
@@ -796,9 +795,9 @@ class MFS_Grid():
 
             total_weight = w000 + w100 + w010 + w110 + w001 + w011 + w101 + w111
 
-            i = max(0, min(i, self.resolution[0]))
-            j = max(0, min(j, self.resolution[1]))
-            k = max(0, min(k, self.resolution[2]))
+            i = max(i, 0)
+            j = max(j, 0)
+            k = max(k, 0)
 
             last_velocity_u = (
                 self.last_velocity_u[min(i, self.resolution[0])][min(j, self.resolution[1] - 1)][min(k, self.resolution[2] - 1)] * w000 +
