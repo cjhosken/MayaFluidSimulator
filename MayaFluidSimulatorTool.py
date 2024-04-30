@@ -300,14 +300,12 @@ class MFS_Plugin():
                 grid.particles_to_grid(particles, bbox, fluid_density)
                 dt = grid.calc_timestep(timescale, external_force)
                 grid.apply_forces(external_force, dt)
-                grid.solve_divergence(iterations, overrelaxation, stiffness, fluid_density)
+                #grid.solve_divergence(iterations, overrelaxation, stiffness, fluid_density)
                 grid.grid_to_particles(particles, bbox, flipFac, dt)
-                #grid.collide_particles(particles, bbox, pscale)
                 grid.clear()
 
                 cfl += dt            
 
-            
             cmds.currentTime(t + 1, edit=True)
 
             self.update(source, particles, grid, frame_range, timescale, external_force, fluid_density, pscale, flipFac, iterations, overrelaxation, stiffness, progress=progress+1)
@@ -524,7 +522,8 @@ class MFS_Particle():
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
         # Advect particle position
 
-        damp = 0
+        damp = 1
+        damp_2 = 1
 
         # Check if advected position is within the bounding box
         if (min_x <= advected[0] <= max_x and
@@ -538,7 +537,11 @@ class MFS_Particle():
                 self.position[0] = min(max(min_x, advected[0]), max_x)  # Clamp position
 
             if advected[1] < min_y or advected[1] > max_y:    
-                self.velocity[1] *= -damp         
+                self.velocity[1] *= -damp
+                
+                if (advected[1] < min_y):
+                    self.velocity[1] *= damp_2
+
                 self.position[1] = min(max(min_y, advected[1]), max_y)  # Clamp position
 
             if advected[2] < min_z or advected[2] > max_z:
@@ -564,10 +567,16 @@ class MFS_Grid():
         self.resolution = resolution
         self.cell_size = cell_size
 
-        self.velocity = np.zeros((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1, 3), dtype="float64")
-        self.last_velocity = np.zeros((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1, 3), dtype="float64")
+        self.velocity_u = np.zeros((self.resolution[0]+1, self.resolution[1], self.resolution[2]), dtype="float64")
+        self.velocity_v = np.zeros((self.resolution[0], self.resolution[1]+1, self.resolution[2]), dtype="float64")
+        self.velocity_w = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]+1), dtype="float64")
+
+        self.last_velocity_u = np.zeros((self.resolution[0]+1, self.resolution[1], self.resolution[2]), dtype="float64")
+        self.last_velocity_v = np.zeros((self.resolution[0], self.resolution[1]+1, self.resolution[2]), dtype="float64")
+        self.last_velocity_w = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]+1), dtype="float64")
+
         self.density = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
-        self.type = np.zeros((self.resolution[0] + 2, self.resolution[1] + 2, self.resolution[2] + 2), dtype="int64")
+        self.type = np.full((self.resolution[0] + 2, self.resolution[1] + 2, self.resolution[2] + 2), 2, dtype="int64")
         
         self.clear()
 
@@ -576,59 +585,80 @@ class MFS_Grid():
 
         for p in particles:
             x, y, z, i, j, k = self.get_grid_coords(bbox, p.position)
+            self.type[i+1][j+1][k+1] = 1
 
-            w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, False)
+            w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k)
 
-            self.velocity[i][j][k] += p.velocity * w000
+            self.velocity_u[i][j][k] += p.velocity[0] * w000
+            self.velocity_v[i][j][k] += p.velocity[1] * w000
+            self.velocity_w[i][j][k] += p.velocity[2] * w000
             weights[i][j][k] += w000
 
-            self.velocity[min(i + 1, self.resolution[0])][j][k] += p.velocity * w100
+            self.velocity_u[min(i + 1, self.resolution[0])][j][k] += p.velocity[0] * w100
+            self.velocity_v[min(i + 1, self.resolution[0] - 1)][j][k] += p.velocity[1] * w100
+            self.velocity_w[min(i + 1, self.resolution[0] - 1)][j][k] += p.velocity[2] * w100
             weights[min(i + 1, self.resolution[0])][j][k] += w100
 
-            self.velocity[i][min(j + 1, self.resolution[1])][k] += p.velocity * w010
+            self.velocity_u[i][min(j + 1, self.resolution[1] - 1)][k] += p.velocity[0] * w010
+            self.velocity_v[i][min(j + 1, self.resolution[1])][k] += p.velocity[1] * w010
+            self.velocity_w[i][min(j + 1, self.resolution[1] - 1)][k] += p.velocity[2] * w010
             weights[i][min(j + 1, self.resolution[1])][k] += w010
 
-            self.velocity[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][k] += p.velocity * w110
+            self.velocity_u[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1] - 1)][k] += p.velocity[0] * w110
+            self.velocity_v[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1])][k] += p.velocity[1] * w110
+            self.velocity_w[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] += p.velocity[2] * w110
             weights[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][k] += w110
 
-            self.velocity[i][j][min(k + 1, self.resolution[2])] += p.velocity * w001
+            self.velocity_u[i][j][min(k + 1, self.resolution[2] - 1)] += p.velocity[0] * w001
+            self.velocity_v[i][j][min(k + 1, self.resolution[2] - 1)] += p.velocity[1] * w001
+            self.velocity_w[i][j][min(k + 1, self.resolution[2])] += p.velocity[2] * w001
             weights[i][j][min(k + 1, self.resolution[2])] += w001
 
-            self.velocity[i][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] += p.velocity * w011
+            self.velocity_u[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += p.velocity[0] * w011
+            self.velocity_v[i][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2] - 1)] += p.velocity[1] * w011
+            self.velocity_w[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2])] += p.velocity[2] * w011
             weights[i][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] += w011
 
-            self.velocity[min(i + 1, self.resolution[0])][j][min(k + 1, self.resolution[2])] += p.velocity * w101
+            self.velocity_u[min(i + 1, self.resolution[0])][j][min(k + 1, self.resolution[2] - 1)] += p.velocity[0] * w101
+            self.velocity_v[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] += p.velocity[1] * w101
+            self.velocity_w[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2])] += p.velocity[2] * w101
             weights[min(i + 1, self.resolution[0])][j][min(k + 1, self.resolution[2])] += w101
 
-            self.velocity[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] += p.velocity * w111
+            self.velocity_u[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += p.velocity[0] * w111
+            self.velocity_v[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2] - 1)] += p.velocity[1] * w111
+            self.velocity_w[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2])] += p.velocity[2] * w111
             weights[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] += w111
 
         for u in range(self.resolution[0] + 1):
             for v in range(self.resolution[1] + 1):
                 for w in range(self.resolution[2] + 1):
                     if (weights[u][v][w] > 0):
-                        self.velocity[u][v][w] /= weights[u][v][w]
+                        self.velocity_u[u][v][w] /= weights[u][v][w]
+                        self.velocity_v[u][v][w] /= weights[u][v][w]
+                        self.velocity_w[u][v][w] /= weights[u][v][w]
         
         for i in range(self.resolution[0]):
             for j in range(self.resolution[1]):
                 for k in range(self.resolution[2]):
                     self.density[i][j][k] = (weights[i][j][k] + weights[i+1][j+1][k+1]) / (2*np.linalg.norm(self.cell_size)) * rest_density
         
-        self.last_velocity = np.array(self.velocity, copy=True)
+        self.last_velocity_u = np.array(self.velocity_u, copy=True)
+        self.last_velocity_v = np.array(self.velocity_v, copy=True)
+        self.last_velocity_w = np.array(self.velocity_w, copy=True)
 
-    def get_trilinear_weights(self, x, y, z, i, j, k, no_check):
+    def get_trilinear_weights(self, x, y, z, i, j, k):
         dx = x - i
         dy = y - j
         dz = z - k
 
-        w000 = (1 - dx) * (1 - dy) * (1 - dz) * self.is_not_border_cell(i, j, k)
-        w100 = (dx) * (1 - dy) * (1 - dz) * self.is_not_border_cell(i + 1, j, k)
-        w010 = (1 - dx) * (dy) * (1 - dz) * self.is_not_border_cell(i, j + 1, k)
-        w110 = (dx) * (dy) * (1 - dz) * self.is_not_border_cell(i + 1, j + 1, k)
-        w001 = (1 - dx) * (1 - dy) * (dz) * self.is_not_border_cell(i, j, k + 1)
-        w011 = (1 - dx) * (dy) * (dz) * self.is_not_border_cell(i, j + 1, k + 1)
-        w101 = (dx) * (1 - dy) * (dz) * self.is_not_border_cell(i + 1, j, k + 1)
-        w111 = (dx) * (dy) * (dz) * self.is_not_border_cell(i + 1, j + 1, k + 1)
+        w000 = (1 - dx) * (1 - dy) * (1 - dz) * self.is_fluid_cell(i, j, k)
+        w100 = (dx) * (1 - dy) * (1 - dz) * self.is_fluid_cell(i + 1, j, k)
+        w010 = (1 - dx) * (dy) * (1 - dz) * self.is_fluid_cell(i, j + 1, k)
+        w110 = (dx) * (dy) * (1 - dz) * self.is_fluid_cell(i + 1, j + 1, k)
+        w001 = (1 - dx) * (1 - dy) * (dz) * self.is_fluid_cell(i, j, k + 1)
+        w011 = (1 - dx) * (dy) * (dz) * self.is_fluid_cell(i, j + 1, k + 1)
+        w101 = (dx) * (1 - dy) * (dz) * self.is_fluid_cell(i + 1, j, k + 1)
+        w111 = (dx) * (dy) * (dz) * self.is_fluid_cell(i + 1, j + 1, k + 1)
     
         return w000, w100, w010, w110, w001, w011, w101, w111
 
@@ -636,10 +666,10 @@ class MFS_Grid():
         h = np.linalg.norm(self.cell_size)
 
         max_vel = 0
-        for u in range(self.resolution[0]):
-            for v in range(self.resolution[1]):
-                for w in range(self.resolution[2]):
-                    velocity_difference = np.linalg.norm(self.velocity[u + 1][v + 1][w + 1] - self.velocity[u][v][w])
+        for i in range(self.resolution[0]):
+            for j in range(self.resolution[1]):
+                for k in range(self.resolution[2]):
+                    velocity_difference = np.linalg.norm(self.get_velocity(self.velocity_u, self.velocity_v, self.velocity_w, i, j, k))
                     max_vel = max(max_vel, velocity_difference)
 
         max_vel /= 2 * h
@@ -654,10 +684,18 @@ class MFS_Grid():
         return dt
 
     def apply_forces(self, external_force, dt):
-        for u in range(self.resolution[0] + 1):
-            for v in range(self.resolution[1] + 1):
-                for w in range(self.resolution[2] + 1):
-                    self.velocity[u][v][w] += external_force * dt
+        for u in range(self.resolution[0]):
+            for v in range(self.resolution[1]):
+                for w in range(self.resolution[2]):
+                    if (u % 2 == 0 and v % 2 ==0 and w % 2 == 0):
+                        self.velocity_u[u][v][w] += external_force[0] * dt
+                        self.velocity_u[u+1][v][w] += external_force[0] * dt
+
+                        self.velocity_v[u][v][w] += external_force[1] * dt
+                        self.velocity_v[u][v+1][w] += external_force[1] * dt
+
+                        self.velocity_w[u][v][w] += external_force[2] * dt
+                        self.velocity_w[u][v][w+1] += external_force[2] * dt
 
     def solve_divergence(self, iterations, overrelaxation, stiffness, rest_density):
         for n in range(iterations):
@@ -667,33 +705,40 @@ class MFS_Grid():
             for i in range(self.resolution[0]):
                 for j in range(self.resolution[1]):
                     for k in range(self.resolution[2]):
+
+                        #print("CELL", self.cell_size)
+                        #print("VELU", self.velocity_u[i][j][k])
+                        #print("VELV", self.velocity_v[i][j][k])
+                        #print("VELW", self.velocity_w[i][j][k])
+
                         divergence[i][j][k] = overrelaxation * (
-                            self.velocity[i+1][j][k][0] - self.velocity[i][j][k][0] +
-                            self.velocity[i][j+1][k][1] - self.velocity[i][j][k][1] +
-                            self.velocity[i][j][k+1][2] - self.velocity[i][j][k][2]
-                        ) 
+                            (self.velocity_u[i+1][j][k] - self.velocity_u[i][j][k]) / self.cell_size[0] +
+                            (self.velocity_v[i][j+1][k] - self.velocity_v[i][j][k]) / self.cell_size[1] +
+                            (self.velocity_w[i][j][k+1] - self.velocity_w[i][j][k]) / self.cell_size[2]
+                        )
+
                         #- stiffness * (self.density[i][j][k] - rest_density)
 
                         borders[i][j][k] = (
-                            self.type[i][j+1][k+1] + 
-                            self.type[i+2][j+1][k+1] +
-                            self.type[i+1][j][k+1] +
-                            self.type[i+1][j+2][k+1] +
-                            self.type[i+1][j+1][k] +
-                            self.type[i+1][j+1][k+2]
+                            self.is_not_border(i, j+1, k+1) + 
+                            self.is_not_border(i+2, j+1, k+1) +
+                            self.is_not_border(i+1, j, k+1) +
+                            self.is_not_border(i+1, j+2, k+1) +
+                            self.is_not_border(i+1, j+1, k) +
+                            self.is_not_border(i+1, j+1, k+2)
                         )
             
             for i in range(self.resolution[0]):
                 for j in range(self.resolution[1]):
                     for k in range(self.resolution[2]):
-                        self.velocity[i][j][k][0] += divergence[i][j][k] * self.type[i][j+1][k+1]/borders[i][j][k]
-                        self.velocity[i+1][j][k][0] -= divergence[i][j][k] * self.type[i+2][j+1][k+1]/borders[i][j][k]
+                        self.velocity_u[i][j][k] += divergence[i][j][k] * self.is_not_border(i, j+1, k+1)/borders[i][j][k]
+                        self.velocity_u[i+1][j][k] -= divergence[i][j][k] * self.is_not_border(i+2, j+1, k+1)/borders[i][j][k]
 
-                        self.velocity[i][j][k][1] += divergence[i][j][k] * self.type[i+1][j][k+1]/borders[i][j][k]
-                        self.velocity[i][j+1][k][1] -= divergence[i][j][k] * self.type[i+1][j+2][k+1]/borders[i][j][k]
+                        self.velocity_v[i][j][k] += divergence[i][j][k] * self.is_not_border(i+1, j, k+1)/borders[i][j][k]
+                        self.velocity_v[i][j+1][k] -= divergence[i][j][k] * self.is_not_border(i+1, j+2, k+1)/borders[i][j][k]
 
-                        self.velocity[i][j][k][2] += divergence[i][j][k] * self.type[i+1][j+1][k]/borders[i][j][k]
-                        self.velocity[i][j][k+1][2] -= divergence[i][j][k] * self.type[i+1][j+1][k+2]/borders[i][j][k]
+                        self.velocity_w[i][j][k] += divergence[i][j][k] * self.is_not_border(i+1, j+1, k)/borders[i][j][k]
+                        self.velocity_w[i][j][k+1] -= divergence[i][j][k] * self.is_not_border(i+1, j+1, k)+2/borders[i][j][k]
 
 
 
@@ -701,27 +746,53 @@ class MFS_Grid():
         for p in particles:
             x, y, z, i, j, k = self.get_grid_coords(bbox, p.position)
 
-            w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, False)
+            w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k)
 
             total_weight = w000 + w100 + w010 + w110 + w001 + w011 + w101 + w111
 
-            current_velocity = (
-                self.velocity[i][j][k] * w000 + 
-                self.velocity[min(i + 1, self.resolution[0])][j][k] * w100 + 
-                self.velocity[i][min(j + 1, self.resolution[1])][k] * w010 +
-                self.velocity[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][k] * w110 +
-                self.velocity[i][j][min(k + 1, self.resolution[2])] * w001 + 
-                self.velocity[i][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] * w011 +
-                self.velocity[min(i + 1, self.resolution[0])][j][min(k + 1, self.resolution[2])] * w101 +
-                self.velocity[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] * w111
+            current_velocity = np.zeros(3)
+
+            velocity_u = (
+                self.velocity_u[i][j][k] * w000 +
+                self.velocity_u[min(i + 1, self.resolution[0])][j][k] * w100 +
+                self.velocity_u[i][min(j + 1, self.resolution[1] - 1)][k] * w010 +
+                self.velocity_u[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1] - 1)][k] * w110 +
+                self.velocity_u[i][j][min(k + 1, self.resolution[2] - 1)] * w001 +
+                self.velocity_u[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] * w011 +
+                self.velocity_u[min(i + 1, self.resolution[0])][j][min(k + 1, self.resolution[2] - 1)] * w101 +
+                self.velocity_u[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] * w111
             )
+
+            velocity_v = (
+                self.velocity_v[i][j][k] * w000 +
+                self.velocity_v[i][min(j + 1, self.resolution[1])][k] * w010 +
+                self.velocity_v[min(i + 1, self.resolution[0] - 1)][j][k] * w100 +
+                self.velocity_v[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1])][k] * w110 +
+                self.velocity_v[i][j][min(k + 1, self.resolution[2] - 1)] * w001 +
+                self.velocity_v[i][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2] - 1)] * w011 +
+                self.velocity_v[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2] - 1)] * w101 +
+                self.velocity_v[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2] - 1)] * w111
+            )
+
+            velocity_w = (
+                self.velocity_w[i][j][k] * w000 +
+                self.velocity_w[i][j][min(k + 1, self.resolution[2])] * w001 +
+                self.velocity_w[i][min(j + 1, self.resolution[1] - 1)][k] * w010 +
+                self.velocity_w[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2])] * w011 +
+                self.velocity_w[min(i + 1, self.resolution[0] - 1)][j][k] * w100 +
+                self.velocity_w[min(i + 1, self.resolution[0] - 1)][j][min(k + 1, self.resolution[2])] * w101 +
+                self.velocity_w[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] * w110 +
+                self.velocity_w[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2])] * w111
+            )
+
+            current_velocity = np.array([velocity_u, velocity_v, velocity_w])
 
             if (total_weight > 0):
                 current_velocity /= total_weight
 
             x, y, z, i, j, k = self.get_grid_coords(bbox, p.position - p.velocity * dt)
 
-            w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, True)
+            w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k)
 
             total_weight = w000 + w100 + w010 + w110 + w001 + w011 + w101 + w111
 
@@ -729,78 +800,67 @@ class MFS_Grid():
             j = max(0, min(j, self.resolution[1]))
             k = max(0, min(k, self.resolution[2]))
 
-            last_velocity = (
-                self.last_velocity[i][j][k] * w000 + 
-                self.last_velocity[min(i + 1, self.resolution[0])][j][k] * w100 + 
-                self.last_velocity[i][min(j + 1, self.resolution[1])][k] * w010 +
-                self.last_velocity[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][k] * w110 +
-                self.last_velocity[i][j][min(k + 1, self.resolution[2])] * w001 + 
-                self.last_velocity[i][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] * w011 +
-                self.last_velocity[min(i + 1, self.resolution[0])][j][min(k + 1, self.resolution[2])] * w101 +
-                self.last_velocity[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] * w111
+            last_velocity_u = (
+                self.last_velocity_u[min(i, self.resolution[0])][min(j, self.resolution[1] - 1)][min(k, self.resolution[2] - 1)] * w000 +
+                self.last_velocity_u[min(i + 1, self.resolution[0])][min(j, self.resolution[1] - 1)][min(k, self.resolution[2] - 1)] * w100 +
+                self.last_velocity_u[min(i, self.resolution[0])][min(j + 1, self.resolution[1] - 1)][min(k, self.resolution[2] - 1)] * w010 +
+                self.last_velocity_u[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1] - 1)][min(k, self.resolution[2] - 1)] * w110 +
+                self.last_velocity_u[min(i, self.resolution[0])][min(j, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] * w001 +
+                self.last_velocity_u[min(i, self.resolution[0])][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] * w011 +
+                self.last_velocity_u[min(i + 1, self.resolution[0])][min(j, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] * w101 +
+                self.last_velocity_u[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] * w111
             )
+
+            last_velocity_v = (
+                self.last_velocity_v[min(i, self.resolution[0] - 1)][min(j, self.resolution[1])][min(k, self.resolution[2] - 1)] * w000 +
+                self.last_velocity_v[min(i, self.resolution[0] - 1)][min(j + 1, self.resolution[1])][min(k, self.resolution[2] - 1)] * w010 +
+                self.last_velocity_v[min(i + 1, self.resolution[0] - 1)][min(j, self.resolution[1])][min(k, self.resolution[2] - 1)] * w100 +
+                self.last_velocity_v[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1])][min(k, self.resolution[2] - 1)] * w110 +
+                self.last_velocity_v[min(i, self.resolution[0] - 1)][min(j, self.resolution[1])][min(k + 1, self.resolution[2] - 1)] * w001 +
+                self.last_velocity_v[min(i, self.resolution[0] - 1)][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2] - 1)] * w011 +
+                self.last_velocity_v[min(i + 1, self.resolution[0] - 1)][min(j, self.resolution[1])][min(k + 1, self.resolution[2] - 1)] * w101 +
+                self.last_velocity_v[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2] - 1)] * w111
+            )
+
+            last_velocity_w = (
+                self.last_velocity_w[min(i, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k, self.resolution[2])] * w000 +
+                self.last_velocity_w[min(i, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k + 1, self.resolution[2])] * w001 +
+                self.last_velocity_w[min(i, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k, self.resolution[2])] * w010 +
+                self.last_velocity_w[min(i, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2])] * w011 +
+                self.last_velocity_w[min(i + 1, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k, self.resolution[2])] * w100 +
+                self.last_velocity_w[min(i + 1, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k + 1, self.resolution[2])] * w101 +
+                self.last_velocity_w[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k, self.resolution[2])] * w110 +
+                self.last_velocity_w[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2])] * w111
+            )
+
+            last_velocity = np.array([last_velocity_u, last_velocity_v, last_velocity_w])
 
             if (total_weight > 0):
                 last_velocity /= total_weight
 
             p.advect(current_velocity, last_velocity, flipFac, bbox, dt)
-
-    def collide_particles(self, particles, bbox, pscale):
-        min_x, min_y, min_z, max_x, max_y, max_z = bbox
-        stored_particles = {}
-
-        for op in particles:
-            x, y, z, i, j, k = self.get_grid_coords(bbox, op.position)
-            if (i, j, k) not in stored_particles:
-                stored_particles[(i, j, k)] = []
-            stored_particles[(i, j, k)].append(op)
-        
-        for coords, cell_particles in stored_particles.items():
-            i, j, k = coords
-
-            for p in cell_particles:
-                for o in cell_particles:
-                    if (o.id != p.id):
-                        dist = np.linalg.norm(o.position - p.position)
-
-                        if (dist < pscale * 2):
-
-                            separation_vector = (o.position - p.position)
-                            
-                            if (dist > 0):
-                                separation_vector /= dist
-
-                            total_mass = p.mass + o.mass
-                            p.velocity = ((p.mass - o.mass) / total_mass) * p.velocity + ((2 * o.mass) / total_mass) * o.velocity
-                            o.velocity = ((2 * p.mass) / total_mass) * p.velocity + ((o.mass - p.mass) / total_mass) * o.velocity
-
-                            p.position -= separation_vector * (pscale - dist) / 2
-                            o.position += separation_vector * (pscale - dist) / 2
-
-
-                            # Update positions and velocities in the particles array
-                        for particle in particles:
-                            if particle.id == p.id:
-                                particle.position = p.position
-                                particle.velocity = p.velocity
-                            elif particle.id == o.id:
-                                particle.position = o.position
-                                particle.velocity = o.velocity
-
-                        # Handling boundary conditions
-                        for particle in particles:
-                            particle.position[0] = min(max_x, max(min_x, particle.position[0]))
-                            particle.position[1] = min(max_y, max(min_y, particle.position[1]))
-                            particle.position[2] = min(max_z, max(min_z, particle.position[2]))
-                            
-            
-
-    def is_not_border_cell(self, i, j, k):
+    
+    def get_velocity(self, velu, velv, velw, i, j, k):
+        return np.array([
+            velu[i + 1][j][k] - velu[i][j][k],
+            velv[i][j+1][k] - velv[i][j][k],
+            velw[i][j][k+1] - velw[i][j][k]
+        ]) / self.cell_size
+    
+    def is_not_border(self, i, j, k):
         return float(
             0 <= i < self.resolution[0] and \
             0 <= j < self.resolution[1] and \
             0 <= k < self.resolution[2] and \
-            self.type[i+1][j+1][k+1] != 0
+            (self.type[i+1][j+1][k+1] != 2)
+        )
+
+    def is_fluid_cell(self, i, j, k):
+        return float(
+            0 <= i < self.resolution[0] and \
+            0 <= j < self.resolution[1] and \
+            0 <= k < self.resolution[2] and \
+            (self.type[i+1][j+1][k+1] == 1)
         )
     
     def get_grid_coords(self, bbox, position):
@@ -816,13 +876,16 @@ class MFS_Grid():
         return x, y, z, i, j, k
 
     def clear(self):
-        self.velocity = np.zeros((self.resolution[0]+1, self.resolution[1]+1, self.resolution[2]+1, 3), dtype="float64")
+        self.velocity_u = np.zeros((self.resolution[0]+1, self.resolution[1], self.resolution[2]), dtype="float64")
+        self.velocity_v = np.zeros((self.resolution[0], self.resolution[1]+1, self.resolution[2]), dtype="float64")
+        self.velocity_w = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]+1), dtype="float64")
+
         self.density = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
 
         for i in range(1, self.resolution[0]+1):
             for j in range(1, self.resolution[1]+1):
                 for k in range(1, self.resolution[2]+1):
-                    self.type[i][j][k] = 1
+                    self.type[i][j][k] = 0
 
 
 # Create and initialize the plugin.
