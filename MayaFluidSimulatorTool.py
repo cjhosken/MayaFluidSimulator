@@ -300,7 +300,7 @@ class MFS_Plugin():
                 grid.particles_to_grid(particles, bbox, fluid_density)
                 dt = grid.calc_timestep(timescale, external_force)
                 grid.apply_forces(external_force, dt)
-                grid.solve_divergence(iterations, overrelaxation, stiffness, fluid_density)
+                #grid.solve_divergence(iterations, overrelaxation, stiffness, fluid_density)
                 grid.grid_to_particles(particles, bbox, flipFac, dt)
                 grid.clear()
 

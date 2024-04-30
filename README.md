@@ -12,3 +12,5 @@ https://www.youtube.com/watch?v=qsYE1wMEMPA
 https://www.youtube.com/watch?v=rSKMYc1CQHE
 https://youtu.be/XmzBREkK8kY
 
+
+https://www.diva-portal.org/smash/get/diva2:441801/FULLTEXT01.pdf
