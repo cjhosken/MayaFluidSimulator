@@ -581,8 +581,8 @@ class MFS_Grid():
             self.density[i][j][k] += 1
 
         for p in particles:
-            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, self.cell_size / 2)
-
+            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position - np.array(0.0, 0.5, 0.0))
+        
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k)
 
             self.velocity_u[i][j][k] += p.velocity[0] * w000
@@ -603,6 +603,7 @@ class MFS_Grid():
             self.velocity_u[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1] - 1)][k] += p.velocity[0] * w110
             self.velocity_v[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1])][k] += p.velocity[1] * w110
             self.velocity_w[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][k] += p.velocity[2] * w110
+            
             weights[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1])][k] += w110
 
             self.velocity_u[i][j][min(k + 1, self.resolution[2] - 1)] += p.velocity[0] * w001
@@ -611,7 +612,9 @@ class MFS_Grid():
             weights[i][j][min(k + 1, self.resolution[2])] += w001
 
             self.velocity_u[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2] - 1)] += p.velocity[0] * w011
+
             self.velocity_v[i][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2] - 1)] += p.velocity[1] * w011
+
             self.velocity_w[i][min(j + 1, self.resolution[1] - 1)][min(k + 1, self.resolution[2])] += p.velocity[2] * w011
             weights[i][min(j + 1, self.resolution[1])][min(k + 1, self.resolution[2])] += w011
 

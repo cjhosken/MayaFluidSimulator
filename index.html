@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Particle Grid Simulation</title>
+<style>
+    body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    canvas {
+        border: 1px solid black;
+    }
+</style>
+</head>
+<body>
+<canvas id="particleCanvas" width="500" height="500"></canvas>
+
+<script>
+    var CELL_SIZE = 50;
+    var BOUNDS = [500, 500]
+    var GRID_SIZE = 20;
+    var OFFSET = [90, -80]
+    var PSCALE = 10;
+    var MASS = 5;
+    var SEARCH = 25;
+    var KFAC = 200000;
+    var DENSITY =998.2
+    var GRAVITY = [0, 98];
+    var TSCALE = 0.01;
+    var VISCFAC = 5000000;
+    var FLOOR_DAMP = 0.0
+    var SMOOTHING_FAC = 0.1
+
+    function HSVtoRGB(h, s, v) {
+            let c = v * s;
+            let hp = (h / 60) % 6;
+            let x = c * (1 - Math.abs(hp % 2 - 1));
+            let rgb = [0, 0, 0];
+            
+            if (0 <= hp && hp < 1) {
+                rgb = [c, x, 0];
+            } else if (1 <= hp && hp < 2) {
+                rgb = [x, c, 0];
+            } else if (2 <= hp && hp < 3) {
+                rgb = [0, c, x];
+            } else if (3 <= hp && hp < 4) {
+                rgb = [0, x, c];
+            } else if (4 <= hp && hp < 5) {
+                rgb = [x, 0, c];
+            } else if (5 <= hp && hp < 6) {
+                rgb = [c, 0, x];
+            }
+            
+            let m = v - c;
+            rgb[0] += m;
+            rgb[1] += m;
+            rgb[2] += m;
+            
+        // Scale RGB values to the range [0, 255]
+        return rgb.map(val => Math.round(val * 255));
+    }
+
+    class Particle {
+        constructor(x, y, size, id, ctx) {
+            this.id = -1;
+            this.position = [x, y];
+            this.size = size;
+            this.ctx = ctx;
+            this.velocity = [0, 0.0];
+            this.id = id;
+            this.pressure = 0;
+            this.density = 0;
+            this.mass = 0;
+            this.neighbors = []
+            this.force = [0.0, 0.0]
+        }
+
+        draw() {
+            this.ctx.beginPath();
+            this.ctx.arc(this.position[0], this.position[1], this.size / 2, 0, Math.PI * 2);
+
+            var speed = Math.sqrt(this.velocity[0] * this.velocity[0] + this.velocity[1] * this.velocity[1])
+
+            speed =  Math.sqrt(speed) / 6
+
+            let rgbColor = HSVtoRGB(200, Math.max(1/speed, 0.01), Math.max(speed, 0.7));
+
+            this.ctx.fillStyle = `rgb(${rgbColor[0]}, ${rgbColor[1]}, ${rgbColor[2]})`;
+            this.ctx.strokeStyle = "black"
+            this.ctx.fill();
+            this.ctx.stroke();
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        const canvas = document.getElementById('particleCanvas');
+        const ctx = canvas.getContext('2d');
+
+
+        let particles = new Array(GRID_SIZE).fill(null).map(() => new Array(GRID_SIZE).fill(null));
+        let velocity_u = new Array((BOUNDS[0]/CELL_SIZE) + 1).fill(0).map(() => new Array((BOUNDS[1]/CELL_SIZE)).fill(0));
+        let velocity_v = new Array((BOUNDS[0]/CELL_SIZE)).fill(0).map(() => new Array((BOUNDS[1]/CELL_SIZE + 1)).fill(0));
+        let type = new Array((BOUNDS[0]/CELL_SIZE) + 2).fill(2).map(() => new Array((BOUNDS[1]/CELL_SIZE) + 2).fill(2));
+        let normal = new Array((BOUNDS[0]/CELL_SIZE) + 2).fill(2).map(() => new Array((BOUNDS[1]/CELL_SIZE) + 2).fill(2));
+        let density = new Array((BOUNDS[0]/CELL_SIZE)).fill(2).map(() => new Array((BOUNDS[1]/CELL_SIZE)).fill(2));
+
+        var id = 0;
+
+        for (let i = 0; i < GRID_SIZE; i++) {
+            for (let j = 0; j < GRID_SIZE; j++) {
+        
+                particles[i][j] = new Particle(
+                    (i + 0.5) * PSCALE + OFFSET[0],
+                    (j + 0.5) * PSCALE + canvas.height - (PSCALE * GRID_SIZE) + OFFSET[1],
+                    PSCALE,
+                    id,
+                    ctx
+                );
+                id+=1;
+            }
+        }
+
+        function update() {
+            to_grid()
+            calc_forces()
+            boundary_conditions()
+            solve_divergence()
+            from_grid()
+        }
+
+        function drawGrid() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            for (let x = -1; x < type.length - 1; x += 1) {
+                for (let y = -1; y < type[0].length - 1; y += 1) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = "black"
+                    ctx.fillStyle = "black"
+                    if (type[x+1][y+1] == 2) {ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);}
+                    ctx.fillStyle = "blue"
+                    if (type[x+1][y+1] == 1) {ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);}
+                    if (type[x+1][y+1] == 0) {ctx.strokeRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);}
+                    ctx.stroke();
+                }
+            }
+
+            // Draw horizontal lines
+            for (let ux = 0; ux < velocity_u.length; ux += 1) {
+                for (let uy = velocity_u[0].length - 1; uy >= 0; uy -= 1) {
+                    ctx.beginPath();
+                    ctx.arc((ux-0.0)*CELL_SIZE, (uy-0.5)*CELL_SIZE, Math.abs(velocity_u[ux][uy]), 0, Math.PI * 2);
+                    ctx.fillStyle = "red"
+                    ctx.fill();
+                    ctx.stroke();
+                }
+            }
+
+            // Draw horizontal lines
+            for (let vx = 0; vx < velocity_v.length; vx += 1) {
+                for (let vy = velocity_v[0].length - 1; vy >= 0; vy -= 1) {
+                    ctx.beginPath();
+                    ctx.arc((vx-0.5)*CELL_SIZE, (vy-0.0)*CELL_SIZE, Math.abs(velocity_u[vx][vy]), 0, Math.PI * 2);
+                    ctx.fillStyle = "green"
+                    ctx.fill();
+                    ctx.stroke();
+                }
+            }
+
+            particles.forEach(row => {
+                row.forEach(particle => {
+                    particle.draw();
+                });
+            });
+            
+        }
+
+        function to_grid() {
+            let weight_u = new Array((BOUNDS[0]/CELL_SIZE) + 1).fill(0).map(() => new Array((BOUNDS[1]/CELL_SIZE)).fill(0));
+            let weight_v = new Array((BOUNDS[0]/CELL_SIZE) + 1).fill(0).map(() => new Array((BOUNDS[1]/CELL_SIZE)).fill(0));
+
+            particles.forEach(row => {
+                row.forEach(particle => {
+                    
+                    i = max(Math.floor((particle.position[0]) / CELL_SIZE), 0)
+                    j = max(Math.floor((particle.position[1]) / CELL_SIZE), 0)
+                    type[min(i+1, density.length-1)][min(j+1, density[0].length-1)] = 1
+
+                    x = particle.position[0] / CELL_SIZE
+                    y = particle.position[1] / CELL_SIZE - 0.5
+
+                    i = Math.floor(x)
+                    j = Math.floor(y) 
+
+                    dx = x - i
+                    dy = y - j
+
+                   //console.log("dx", dx, "dy", dy)
+
+                    b00 = (type[i+1][j+1] != 2)
+                    b10 = (type[i+2][j+1] != 2)
+                    b01 = (type[i+1][j+2] != 2)
+                    b11 = (type[i+2][j+2] != 2)
+
+                    w00 = (1 - dx) * (1 - dy) * b00
+                    w10 = (dx) * (1 - dy) * b10
+                    w01 = (1 - dx) * (dy) * b01
+                    w11 = (dx) * (dy) * b11
+
+                    velocity_u[i][j] += w00 * particle.velocity[0]
+                    weight_u[i][j] += w00
+                    velocity_u[i+1][j] += w10 * particle.velocity[0]
+                    weight_u[i+1][j] += w10
+                    velocity_u[i][j+1] += w01 * particle.velocity[0]
+                    weight_u[i][j+1] += w01
+                    velocity_u[i+1][j+1] += w11 * particle.velocity[0]
+                    weight_u[i+1][j+1] += w11
+
+                    
+                    x = particle.position[0] / CELL_SIZE 
+                    y = particle.position[1] / CELL_SIZE
+
+                    i = Math.floor(x)
+                    j = Math.floor(y) 
+
+                    dx = x - i
+                    dy = y - j
+
+                    b00 = (type[i+1][j+1] != 2)
+                    b10 = (type[i+2][j+1] != 2)
+                    b01 = (type[i+1][j+2] != 2)
+                    b11 = (type[i+2][j+2] != 2)
+
+                    w00 = (1 - dx) * (1 - dy) * b00
+                    w10 = (dx) * (1 - dy) * b10
+                    w01 = (1 - dx) * (dy) * b01
+                    w11 = (dx) * (dy) * b11
+
+                    console.log(velocity_v[i][j])
+
+                    velocity_v[i][j] += w00 * particle.velocity[1]
+                    weight_v[i][j] += w00
+                    velocity_v[i+1][j] += w10 * particle.velocity[1]
+                    weight_v[i+1][j] += w10
+                    velocity_v[i][j+1] += w01 * particle.velocity[1]
+                    weight_v[i][j+1] += w01
+                    velocity_v[i+1][j+1] += w11 * particle.velocity[1]
+                    weight_v[i+1][j+1] += w11    
+                    
+                    
+                    x = particle.position[0] / CELL_SIZE + 0.5
+                    y = particle.position[1] / CELL_SIZE + 0.5
+
+                    i = Math.floor(x)
+                    j = Math.floor(y) 
+
+                    dx = x - i
+                    dy = y - j
+
+                    b00 = (type[i+1][j+1] != 2)
+                    b10 = (type[i+2][j+1] != 2)
+                    b01 = (type[i+1][j+2] != 2)
+                    b11 = (type[i+2][j+2] != 2)
+
+                    w00 = (1 - dx) * (1 - dy) * b00
+                    w10 = (dx) * (1 - dy) * b10
+                    w01 = (1 - dx) * (dy) * b01
+                    w11 = (dx) * (dy) * b11
+
+                    //console.log("i:", i, "j:", j);
+
+                    density[i][j] += w00
+                    density[i+1][j] += w10
+                    density[i][j+1] += w01
+                    density[i+1][j+1] += w11
+
+                })
+            })
+
+            for (let ux = 0; ux<velocity_u.length; ux++) {
+                for (let uy = 0; uy<velocity_u[0].length; uy++) {
+                    if (weight_u[ux][uy] > 0) {
+                        velocity_u[ux][uy] /= weight_u[ux][uy]
+                    }
+                }
+            }
+
+            for (let vx = 0; vx<velocity_v.length; vx++) {
+                for (let vy = 0; vy<velocity_v[0].length; vy++) {
+                    if (weight_v[vx][vy] > 0) {
+                        velocity_v[vx][vy] /= weight_v[vx][vy]
+                    }
+                }
+            }
+        }
+
+        function calc_forces() {
+            for (let ux = 0; ux<velocity_u.length; ux++) {
+                for (let uy = 0; uy<velocity_u[0].length; uy++) {
+                    velocity_u[ux][uy] += GRAVITY[0] * TSCALE 
+                }
+            }
+
+            for (let vx = 0; vx<velocity_v.length; vx++) {
+                for (let vy = 0; vy<velocity_v[0].length; vy++) {
+                    velocity_v[vx][vy] += GRAVITY[1] * TSCALE
+                }
+            }
+        }
+
+        function boundary_conditions() {
+            for (let uy = 0; uy<velocity_u[0].length; uy++) {
+                if (velocity_u[0][uy] < 0) velocity_u[0][uy] = 0
+                if (velocity_u[velocity_u[0].length-1][uy] > 0) velocity_u[velocity_u[0].length-1][uy] = 0
+            }
+
+            for (let vx = 0; vx<velocity_v.length; vx++) {
+                if (velocity_v[vx][0] < 0) velocity_v[vx][0] = 0
+                if (velocity_v[vx][velocity_v.length-1] > 0) velocity_v[vx][velocity_v.length] = 0
+            }
+        }
+
+        function solve_divergence() {
+            let divergence = new Array((BOUNDS[0]/CELL_SIZE)).fill(0).map(() => new Array((BOUNDS[1]/CELL_SIZE)).fill(0));
+            let borders = new Array((BOUNDS[0]/CELL_SIZE)).fill(0).map(() => new Array((BOUNDS[1]/CELL_SIZE)).fill(0));
+            
+            for (let n = 0; n < 1; n++) {
+                for (let i = 0; i < density.length; i++) {
+                    for (let j = 0; j < density[0].length; j++) {
+                        divergence[i][j] = (
+                            (velocity_u[i + 1][j] - velocity_u[i][j]) + 
+                            (velocity_v[i][j+1] - velocity_v[i][j])
+                        ) * 1.9 - (density[i][j] - 1)
+
+                        borders[i][j] = (
+                            (type[i][j+1] != 2) +
+                            (type[i+2][j+1] != 2) +
+                            (type[i+1][j] != 2) + 
+                            (type[i+1][j+2] != 2)
+                        )
+                    }
+                }
+                for (let i = 0; i < density.length; i++) {
+                    for (let j = 0; j < density[0].length; j++) {
+                        velocity_u[i][j] += divergence[i][j] * (type[i][j+1] != 2)/borders[i][j]
+                        velocity_u[i+1][j] -= divergence[i][j] * (type[i+2][j+1] != 2)/borders[i][j]
+
+                        velocity_v[i][j] += divergence[i][j] * (type[i+1][j+1] != 2)/borders[i][j]
+                        velocity_v[i][j+1] -= divergence[i][j] * (type[i+1][j+2] != 2)/borders[i][j]
+                    }
+                }
+            }
+        }
+
+        function from_grid() {
+            particles.forEach(row => {
+                row.forEach(particle => {
+                    x = particle.position[0] / CELL_SIZE
+                    y = particle.position[1] / CELL_SIZE - 0.5
+
+                    i = Math.floor(x)
+                    j = Math.floor(y) 
+
+                    dx = x - i
+                    dy = y - j
+
+                    b00 = (type[i+1][j+1] != 2)
+                    b10 = (type[i+2][j+1] != 2)
+                    b01 = (type[i+1][j+2] != 2)
+                    b11 = (type[i+2][j+2] != 2) 
+
+                    w00 = (1 - dx) * (1 - dy) * b00
+                    w10 = (dx) * (1 - dy) * b10
+                    w01 = (1 - dx) * (dy) * b01
+                    w11 = (dx) * (dy) * b11
+
+                    total_weight = w00 + w10 + w01 + w11
+                    
+                    i = Math.max(i, 0)
+                    j = Math.max(j, 0)
+
+                    var vel_u = (
+                        velocity_u[Math.min(i, velocity_u.length-1)][Math.min(j, velocity_u[0].length-1)] * w00 +
+                        velocity_u[Math.min(i+1, velocity_u.length-1)][Math.min(j, velocity_u[0].length-1)] * w10 +
+                        velocity_u[Math.min(i, velocity_u.length-1)][Math.min(j+1, velocity_u[0].length-1)] * w01 + 
+                        velocity_u[Math.min(i+1, velocity_u.length-1)][Math.min(j+1, velocity_u[0].length-1)] * w11
+                    ) 
+
+                    if (total_weight > 0) vel_u /= total_weight
+
+
+                    x = particle.position[0] / CELL_SIZE - 0.5
+                    y = particle.position[1] / CELL_SIZE
+
+                    i = Math.floor(x)
+                    j = Math.floor(y) 
+
+                    dx = x - i
+                    dy = y - j
+
+                    b00 = (type[i+1][j+1] != 2)
+                    b10 = (type[i+2][j+1] != 2) 
+                    b01 = (type[i+1][j+2] != 2)
+                    b11 = (type[i+2][j+2] != 2)
+
+                    w00 = (1 - dx) * (1 - dy) * b00
+                    w10 = (dx) * (1 - dy) * b10
+                    w01 = (1 - dx) * (dy) * b01
+                    w11 = (dx) * (dy) * b11
+
+                    total_weight = w00 + w10 + w01 + w11
+
+                    i = Math.max(i, 0)
+                    j = Math.max(j, 0)
+
+                    var vel_v = (
+                        velocity_v[Math.min(i, velocity_v.length-1)][Math.min(j, velocity_v[0].length-1)] * w00 +
+                        velocity_v[Math.min(i+1, velocity_v.length-1)][Math.min(j, velocity_v[0].length-1)] * w10 +
+                        velocity_v[Math.min(i, velocity_v.length-1)][Math.min(j+1, velocity_v[0].length-1)] * w01 + 
+                        velocity_v[Math.min(i+1, velocity_v.length-1)][Math.min(j+1, velocity_v[0].length-1)] * w11
+                    ) 
+
+                    
+
+                    if (total_weight > 0) vel_v /= total_weight
+                    
+                    particle.velocity = [vel_u, vel_v]
+
+
+                    advected = [
+                        particle.position[0] + particle.velocity[0] * TSCALE,
+                        particle.position[1] + particle.velocity[1] * TSCALE
+                    ]
+
+                    i = Math.floor((particle.position[0]) / CELL_SIZE)
+                    j = Math.floor((particle.position[1]) / CELL_SIZE)
+                    
+                    if (type[i+1][j+1] == 2) {
+                        ni = Math.sqrt(particle.velocity[0] * particle.velocity[0] + particle.velocity[1] * particle.velocity[1])
+                        nj = Math.sqrt(normal[i+1][j+1][0] * normal[i+1][j+1][0] + normal[i+1][j+1][1] * normal[i+1][j+1][1]) 
+                        // r = d - 2(d . n)n
+                        
+                        norm = normal[i+1][j+1]
+                        vel = particle.velocity
+
+                        angle = dot(vel, norm)
+
+                        particle.velocity[0] = particle.velocity[0] - 2 * angle * norm[0]
+                        particle.velocity[1] = particle.velocity[1] - 2 * angle * norm[1] 
+                    }  
+
+                        particle.position[0] += particle.velocity[0] * TSCALE
+                        particle.position[1] += particle.velocity[1] * TSCALE
+                    
+                });
+            });
+        }
+
+        function dot(i, j) {
+            return i[0] * j[0] + i[1]* j[1]
+        }
+
+        function animate() {
+            clear();
+            update();
+            drawGrid();
+            requestAnimationFrame(animate);
+        }
+
+        function clear() {
+            for (let i = 0; i < type.length; i++) {
+                for (let j = 0; j < type[0].length; j++) {
+                    if (i > 0 && j > 0 && i < type[0].length-1 && j <= type[1].length-1) {
+                        type[i][j] = 0
+                        normal[i][j] = [0,0]
+                    }
+
+                    else {
+                        n = [0, 0]
+                        if (i < 1) {
+                            n[0] = 1
+                        }
+                        if (j <1) {
+                            n[1] = 1
+                        }
+
+                        if (i > BOUNDS[0]/CELL_SIZE)
+                            n[0] = -1
+
+                        if (j > BOUNDS[1]/CELL_SIZE)
+                            n[1] = -1
+
+                        normal[i][j] = n
+                    }
+                }
+            }
+
+            velocity_u = new Array((BOUNDS[0]/CELL_SIZE) + 1).fill(0).map(() => new Array((BOUNDS[1]/CELL_SIZE)).fill(0));
+            velocity_v = new Array((BOUNDS[0]/CELL_SIZE)).fill(0).map(() => new Array((BOUNDS[1]/CELL_SIZE + 1)).fill(0));
+            density = new Array((BOUNDS[0]/CELL_SIZE)).fill(2).map(() => new Array((BOUNDS[1]/CELL_SIZE)).fill(2));
+        }
+
+        
+
+        animate();
+    });
+
+</script>
+</body>
