@@ -14,3 +14,4 @@ https://youtu.be/XmzBREkK8kY
 
 
 https://www.diva-portal.org/smash/get/diva2:441801/FULLTEXT01.pdf
+https://matthias-research.github.io/pages/tenMinutePhysics/18-flip.pdf
