@@ -111,7 +111,6 @@
             }
 
             function update() {
-                last_type = type.slice()
                 clear()
                 var tscale = 0.1
 
@@ -340,16 +339,14 @@
 
                 for (let i = 0; i < CELL_COUNT; i++) {
                     for (let j = 0; j < CELL_COUNT; j++) {
-                        if (density[i][j] > 0) {
+                        if (type[i][j] == 1) {
                             num_fluid_cells += 1
                             average_density += density[i][j]
                         }
                     }
                 }
 
-
                 if (num_fluid_cells > 0) average_density /= num_fluid_cells
-
 
                 for (let ux = 0; ux < velocity_u.length; ux++) {
                     for (let uy = 0; uy < velocity_u[0].length; uy++) {
