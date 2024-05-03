@@ -285,6 +285,15 @@
                         w01 = (1 - dx) * (dy) * b01
                         w11 = (dx) * (dy) * b11
 
+                        total_weight = w00 + w10 + w01 + w11
+
+                        if (total_weight > 0) {
+                            w00 /= total_weight 
+                            w10 /= total_weight 
+                            w01 /= total_weight 
+                            w11 /= total_weight
+                        }
+                        
                         if (w00) {
                             density[i][j] += w00 
                         }
