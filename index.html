@@ -26,9 +26,9 @@
         var BOUNDS = [500, 500]
         var CELL_SIZE = [BOUNDS[0] / CELL_COUNT, BOUNDS[1] / CELL_COUNT]
         var GRID_SIZE = 25;
-        var OFFSET = [90, -200]
+        var OFFSET = [0, 0]
         var PSCALE = 5;
-        var EXTERNAL = [0, 9.8];
+        var EXTERNAL = [0, -9.8];
 
         function HSVtoRGB(h, s, v) {
             let c = v * s;
@@ -62,13 +62,13 @@
         class Particle {
             constructor(x, y, radius) {
                 this.position = [x, y];
-                this.velocity = [100, 0.0];
+                this.velocity = [0.0, 0.0];
                 this.radius = radius;
             }
 
             draw(ctx, draw_offset) {
                 ctx.beginPath();
-                ctx.arc(this.position[0] + draw_offset[0], this.position[1] + draw_offset[1], this.radius, 0, Math.PI * 2);
+                ctx.arc(this.position[0] + draw_offset[0], BOUNDS[1] - this.position[1], this.radius, 0, Math.PI * 2);
 
                 var speed = Math.sqrt(this.velocity[0] * this.velocity[0] + this.velocity[1] * this.velocity[1])
 
@@ -104,7 +104,7 @@
                     const index = o * GRID_SIZE + p
                     particles[index] = new Particle(
                         (o + 0.5) * (PSCALE * 2) + OFFSET[0],
-                        (p + 0.5) * (PSCALE * 2) + canvas.height - (PSCALE * GRID_SIZE) + OFFSET[1],
+                        (p + 0.5) * (PSCALE * 2) + OFFSET[1] + (PSCALE * GRID_SIZE),
                         PSCALE
                     );
                 }
@@ -134,19 +134,24 @@
                         for (let j = 0; j < CELL_COUNT; j += 1) {
                             ctx.beginPath();
                             ctx.strokeStyle = "black"
-                            ctx.strokeRect(i * CELL_SIZE[0] + draw_offset[0], j * CELL_SIZE[1] + draw_offset[1], CELL_SIZE[0], CELL_SIZE[1]);
+                            ctx.strokeRect(i * CELL_SIZE[0] + draw_offset[0], BOUNDS[1] - (j * CELL_SIZE[1] + draw_offset[1]), CELL_SIZE[0], CELL_SIZE[1]);
 
                             if (type[i][j] == 1) {
                                 ctx.fillStyle = "blue"
-                                ctx.fillRect(i * CELL_SIZE[0] + draw_offset[0], j * CELL_SIZE[1] + draw_offset[1], CELL_SIZE[0], CELL_SIZE[1]);
+                                ctx.fillRect(i * CELL_SIZE[0] + draw_offset[0], BOUNDS[1] - (j * CELL_SIZE[1] + draw_offset[1]), CELL_SIZE[0], CELL_SIZE[1]);
                             }
                             ctx.stroke();
 
+                            if (false) {
+                            
+                    
+
                             ctx.beginPath();
-                            ctx.arc((i + 0.5) * CELL_SIZE[0] + draw_offset[0], (j + 0.5) * CELL_SIZE[1] + draw_offset[1], density[i][j] * 10, 0, Math.PI * 2);
+                            ctx.arc((i + 0.5) * CELL_SIZE[0] + draw_offset[0], BOUNDS[1] - ((j + 0.5) * CELL_SIZE[1] + draw_offset[1]), density[i][j] * 10, 0, Math.PI * 2);
                             ctx.fillStyle = "green"
                             ctx.fill();
                             ctx.stroke();
+                            }
                         }
                     }
                 }
@@ -156,7 +161,7 @@
                     for (let ux = 0; ux < velocity_u.length; ux += 1) {
                         for (let uy = velocity_u[0].length - 1; uy >= 0; uy -= 1) {
                             ctx.beginPath();
-                            ctx.arc((ux) * CELL_SIZE[0] + draw_offset[0], (uy + 0.5) * CELL_SIZE[1] + draw_offset[1], Math.abs(velocity_u[ux][uy]) * 0.1, 0, Math.PI * 2);
+                            ctx.arc((ux) * CELL_SIZE[0] + draw_offset[0], BOUNDS[1] - ((uy + 0.5) * CELL_SIZE[1] + draw_offset[1]), Math.abs(velocity_u[ux][uy]) * 0.5, 0, Math.PI * 2);
                             ctx.fillStyle = "red"
                             ctx.fill();
                             ctx.stroke();
@@ -167,7 +172,7 @@
                     for (let vx = 0; vx < velocity_v.length; vx += 1) {
                         for (let vy = velocity_v[0].length - 1; vy >= 0; vy -= 1) {
                             ctx.beginPath();
-                            ctx.arc((vx + 0.5) * CELL_SIZE[0] + draw_offset[0], (vy) * CELL_SIZE[1] + draw_offset[1], Math.abs(velocity_v[vx][vy]) * 0.1, 0, Math.PI * 2);
+                            ctx.arc((vx + 0.5) * CELL_SIZE[0] + draw_offset[0], BOUNDS[1] -  ((vy) * CELL_SIZE[1] + draw_offset[1]), Math.abs(velocity_v[vx][vy]) * 0.5, 0, Math.PI * 2);
                             ctx.fillStyle = "green"
                             ctx.fill();
                             ctx.stroke();
@@ -184,16 +189,6 @@
             function particle_to_grid() {
                 let weight_u = new Array(CELL_COUNT + 1).fill(0).map(() => new Array(CELL_COUNT).fill(0));
                 let weight_v = new Array(CELL_COUNT).fill(0).map(() => new Array(CELL_COUNT + 1).fill(0));
-
-                particles.forEach(particle=> {
-                    x = particle.position[0] / CELL_SIZE[0]
-                    y = particle.position[1] / CELL_SIZE[1]
-
-                    i = Math.max(Math.min(Math.floor(x), type.length - 1), 0)
-                    j = Math.max(Math.min(Math.floor(y), type[0].length - 1), 0)
-
-                    type[i][j] = 1
-                })
 
                 particles.forEach(particle => {
                     x = particle.position[0] / CELL_SIZE[0]
@@ -295,6 +290,14 @@
                     density[Math.min(i, density.length - 1)][Math.min(j + 1, density[0].length - 1)] += w01
                     density[Math.min(i + 1, density.length - 1)][Math.min(j + 1, density[0].length - 1)] += w11
 
+                    x = particle.position[0] / CELL_SIZE[0]
+                    y = particle.position[1] / CELL_SIZE[1]
+
+                    i = Math.max(Math.min(Math.floor(x), type.length - 1), 0)
+                    j = Math.max(Math.min(Math.floor(y), type[0].length - 1), 0)
+
+                    type[i][j] = 1
+
                 })
 
                 for (let ux = 0; ux < velocity_u.length; ux++) {
@@ -366,13 +369,13 @@
 
                 for (let ux = 0; ux < velocity_u.length; ux++) {
                     for (let uy = 0; uy < velocity_u[0].length; uy++) {
-                        velocity_u[ux][uy] += EXTERNAL[0] * dt
+                        velocity_u[ux][uy] += (EXTERNAL[0] * dt)
                     }
                 }
 
                 for (let vx = 0; vx < velocity_v.length; vx++) {
                     for (let vy = 0; vy < velocity_v[0].length; vy++) {
-                        velocity_v[vx][vy] += EXTERNAL[1] * dt
+                        velocity_v[vx][vy] += (EXTERNAL[1] * dt)
                     }
                 }
             }
@@ -416,7 +419,6 @@
             }
 
             function particle_from_grid(dt) {
-
                 // Advect particles
                 particles.forEach(particle => {
                     
@@ -438,12 +440,13 @@
 
                     i = Math.max(0, i)
                     j = Math.max(0, j)
+
+
                     
-                    
-                    w00 = (1 - dx) * (1 - dy) * b00
-                    w10 = (dx) * (1 - dy) * (b10)
-                    w01 = (1 - dx) * (dy) * (b01) 
-                    w11 = (dx) * (dy) * (b11)
+                    w00 = (1 - dx) * (1 - dy) * (b00 && type[Math.min(i, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
+                    w10 = (dx) * (1 - dy) * (b10 && type[Math.min(i+1, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
+                    w01 = (1 - dx) * (dy) * (b01 && type[Math.min(i, type.length - 1)][Math.min(j+1, type[0].length - 1)] == 1)
+                    w11 = (dx) * (dy) * (b11 && type[Math.min(i+1, type.length - 1)][Math.min(j+1, type[0].length - 1)] == 1)
                     
                     total_weight = w00 + w10 + w01 + w11
 
@@ -473,10 +476,10 @@
                     i = Math.max(0, i)
                     j = Math.max(0, j)
 
-                    w00 = (1 - dx) * (1 - dy) * b00
-                    w10 = (dx) * (1 - dy) * (b10)
-                    w01 = (1 - dx) * (dy) * (b01) 
-                    w11 = (dx) * (dy) * (b11)
+                    w00 = (1 - dx) * (1 - dy) * (b00 && type[Math.min(i, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
+                    w10 = (dx) * (1 - dy) * (b10 && type[Math.min(i+1, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
+                    w01 = (1 - dx) * (dy) * (b01 && type[Math.min(i, type.length - 1)][Math.min(j+1, type[0].length - 1)] == 1)
+                    w11 = (dx) * (dy) * (b11 && type[Math.min(i+1, type.length - 1)][Math.min(j+1, type[0].length - 1)] == 1)
 
                     total_weight = w00 + w10 + w01 + w11
 
