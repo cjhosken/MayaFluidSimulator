@@ -25,10 +25,10 @@
         var CELL_COUNT = 50;
         var BOUNDS = [500, 500]
         var CELL_SIZE = [BOUNDS[0] / CELL_COUNT, BOUNDS[1] / CELL_COUNT]
-        var GRID_SIZE = 50;
+        var GRID_SIZE = 20;
         var OFFSET = [50, 50]
-        var PSCALE = 2;
-        var EXTERNAL = [0, -9.8];
+        var PSCALE = 4;
+        var EXTERNAL = [0, -98];
 
         function HSVtoRGB(h, s, v) {
             let c = v * s;
@@ -130,7 +130,7 @@
 
                 var draw_offset = [(500 - BOUNDS[0]) / 2, (500 - BOUNDS[1]) / 2]
 
-                if (true) {
+                if (false) {
 
                     for (let i = 0; i < CELL_COUNT; i += 1) {
                         for (let j = 0; j < CELL_COUNT; j += 1) {
@@ -261,8 +261,8 @@
                     weight_v[Math.min(i + 1, velocity_v.length - 1)][Math.min(j + 1, velocity_v[0].length - 1)] += w11
 
 
-                    x = particle.position[0] / CELL_SIZE[0]
-                    y = particle.position[1] / CELL_SIZE[1] 
+                    x = particle.position[0] / CELL_SIZE[0] - 0.5
+                    y = particle.position[1] / CELL_SIZE[1]  - 0.5
 
                     i = Math.floor(x)
                     j = Math.floor(y)
@@ -285,9 +285,9 @@
                     i = Math.max(0, i)
                     j = Math.max(0, j)
                     
-                    density[Math.min(i, density.length - 1)][Math.min(j, density[0].length - 1)] += w00 
+                    density[Math.min(i, density.length - 1)][Math.min(j, density[0].length - 1)] += w00
                     density[Math.min(i + 1, density.length - 1)][Math.min(j, density[0].length - 1)] += w10
-                    density[Math.min(i, density.length - 1)][Math.min(j + 1, density[0].length - 1)] += w01
+                    density[Math.min(i, density.length - 1)][Math.min(j + 1, density[0].length - 1)] += w01 
                     density[Math.min(i + 1, density.length - 1)][Math.min(j + 1, density[0].length - 1)] += w11
 
                     x = particle.position[0] / CELL_SIZE[0]
@@ -322,7 +322,7 @@
 
                 for (let i = 0; i < CELL_COUNT; i++) {
                         for (let j = 0; j < CELL_COUNT; j++) {
-                            if (type[i][j] == 1) {
+                            if (density[i][j] > 0) {
                                 num_fluid_cells += 1
                                 average_density += density[i][j]
                             }
@@ -389,13 +389,13 @@
 
             function enforce_boundaries() {
                 for (let uy = 0; uy < velocity_u[0].length; uy++) {
-                    if (velocity_u[0][uy] < 0) velocity_u[0][uy] *= -1
-                    if (velocity_u[velocity_u.length - 1][uy] > 0) velocity_u[velocity_u.length - 1][uy] *= -1
+                    if (velocity_u[0][uy] < 0) velocity_u[0][uy] = 0
+                    if (velocity_u[velocity_u.length - 1][uy] > 0) velocity_u[velocity_u.length - 1][uy] = 0
                 }
 
                 for (let vx = 0; vx < velocity_v.length; vx++) {
-                    if (velocity_v[vx][0] < 0) velocity_v[vx][0]  *= -1
-                    if (velocity_v[vx][velocity_v[0].length - 1] > 0) velocity_v[vx][velocity_v[0].length - 1]  *= -1
+                    if (velocity_v[vx][0] < 0) velocity_v[vx][0]  = 0
+                    if (velocity_v[vx][velocity_v[0].length - 1] > 0) velocity_v[vx][velocity_v[0].length - 1]  = 0
                 }
             }
 
@@ -403,10 +403,10 @@
                 for (let n = 0; n < 5; n++) {
                     for (let i = 0; i < CELL_COUNT; i++) {
                         for (let j = 0; j < CELL_COUNT; j++) {
-                            var divergence = 2 * (
+                            var divergence = 1.9 * (
                                 (velocity_u[i + 1][j] - velocity_u[i][j]) / CELL_SIZE[0] +
                                 (velocity_v[i][j + 1] - velocity_v[i][j]) / CELL_SIZE[1]
-                            ) - 0.5 * (density[i][j] - average_density);
+                            ) - 1 * (density[i][j] - average_density * 5);
 
                             var borders = (
                                 in_bounds(i - 1, j, CELL_COUNT, CELL_COUNT) +
@@ -568,7 +568,7 @@
 
 
 
-                    flipFac = 1
+                    flipFac = 0.5
 
                     particle.velocity[0] = (vel_u) * (1 - flipFac) + (particle.velocity[0] + vel_u - last_vel_u) * flipFac
                     particle.velocity[1] = (vel_v) * (1 - flipFac) + (particle.velocity[1] + vel_v - last_vel_v) * flipFac
@@ -589,19 +589,19 @@
                     const r = particle.radius;
 
                     // Handle boundary conditions
-                    if (x - r <= 0) {
+                    if (x - r < 0) {
                         particle.velocity[0] *= 0;
                         particle.position[0] = r;
                     }
-                    if (x + r >= BOUNDS[0]) {
+                    if (x + r > BOUNDS[0]) {
                         particle.velocity[0] *= 0;
                         particle.position[0] = BOUNDS[0] - r;
                     }
-                    if (y - r <= 0) {
+                    if (y - r < 0) {
                         particle.velocity[1] *= 0;
                         particle.position[1] = r;
                     }
-                    if (y + r >= BOUNDS[1]) {
+                    if (y + r > BOUNDS[1]) {
                         particle.velocity[1] *= 0;
                         particle.position[1] = BOUNDS[1] - r;
                     }
@@ -625,8 +625,8 @@
 
                             if (dist_squared < min_dist_squared) {
                                 // Swap velocities
-                                const temp_velocity = particle.velocity.slice(0); // Make a copy
-                                particle.velocity = other.velocity.slice(0);
+                                const temp_velocity = particle.velocity.slice(); // Make a copy
+                                particle.velocity = other.velocity.slice();
                                 other.velocity = temp_velocity;
 
                                 // Calculate the direction of the collision
