@@ -295,10 +295,10 @@
                   
 
                     if (total_weight > 0) {
-                      w00 /= total_weight 
-                      w10 /= total_weight 
-                      w01 /= total_weight 
-                      w11 /= total_weight
+                        w00 /= total_weight 
+                        w10 /= total_weight 
+                        w01 /= total_weight 
+                        w11 /= total_weight
                     }
 
 
@@ -316,6 +316,7 @@
                     j = Math.max(Math.min(Math.floor(y), type[0].length - 1), 0)
 
                     type[i][j] = 1
+                })
 
                 for (let ux = 0; ux < velocity_u.length; ux++) {
                     for (let uy = 0; uy < velocity_u[0].length; uy++) {
@@ -445,7 +446,7 @@
                 for (let n = 0; n < maxIterations && divergenceChange > tolerance; n++) {
                     const previousDivergence = compute_divergence(velocity_u, velocity_v, density, CELL_COUNT, CELL_SIZE);
 
-                    for (let i = 0; i < CELL_COUNT; i++) {work on den
+                    for (let i = 0; i < CELL_COUNT; i++) {
                         for (let j = 0; j < CELL_COUNT; j++) {
                             const borders = (
                                 in_bounds(i - 1, j, CELL_COUNT, CELL_COUNT) +
