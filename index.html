@@ -25,9 +25,9 @@
         var CELL_COUNT = 50;
         var BOUNDS = [500, 500]
         var CELL_SIZE = [BOUNDS[0] / CELL_COUNT, BOUNDS[1] / CELL_COUNT]
-        var GRID_SIZE = 20;
-        var OFFSET = [50, 50]
-        var PSCALE = 4;
+        var GRID_SIZE = 75;
+        var OFFSET = [50, -70]
+        var PSCALE = 2;
         var EXTERNAL = [0, -98];
 
         function HSVtoRGB(h, s, v) {
@@ -74,12 +74,12 @@
 
                 speed = Math.sqrt(speed) / 6
 
-                let rgbColor = HSVtoRGB(200, Math.max(1 / speed, 0.01), Math.max(speed, 0.7));
+                let rgbColor = HSVtoRGB(200, Math.max(3 / speed, 0.01), Math.max(speed, 0.7));
 
                 ctx.fillStyle = `rgb(${rgbColor[0]}, ${rgbColor[1]}, ${rgbColor[2]})`;
                 ctx.strokeStyle = "black"
                 ctx.fill();
-                ctx.stroke();
+                //ctx.stroke();
             }
         }
 
@@ -138,19 +138,23 @@
                             ctx.strokeStyle = "black"
                             ctx.strokeRect(i * CELL_SIZE[0] + draw_offset[0], BOUNDS[1] - (j * CELL_SIZE[1] + draw_offset[1]), CELL_SIZE[0], CELL_SIZE[1]);
 
-                            if (type[i][j] == 1) {
-                                ctx.fillStyle = "blue"
-                                ctx.fillRect(i * CELL_SIZE[0] + draw_offset[0], BOUNDS[1] - (j * CELL_SIZE[1] + draw_offset[1]), CELL_SIZE[0], CELL_SIZE[1]);
+                            if (false) {
+
+
+                                if (type[i][j] == 1) {
+                                    ctx.fillStyle = "blue"
+                                    ctx.fillRect(i * CELL_SIZE[0] + draw_offset[0], BOUNDS[1] - (j * CELL_SIZE[1] + draw_offset[1]), CELL_SIZE[0], CELL_SIZE[1]);
+                                }
+                                ctx.stroke();
                             }
-                            ctx.stroke();
 
                             if (false) {
-                            
-                            ctx.beginPath();
-                            ctx.arc((i + 0.5) * CELL_SIZE[0] + draw_offset[0], BOUNDS[1] - ((j + 0.5) * CELL_SIZE[1] + draw_offset[1]), density[i][j] * 10, 0, Math.PI * 2);
-                            ctx.fillStyle = "green"
-                            ctx.fill();
-                            ctx.stroke();
+
+                                ctx.beginPath();
+                                ctx.arc((i + 0.5) * CELL_SIZE[0] + draw_offset[0], BOUNDS[1] - ((j + 0.5) * CELL_SIZE[1] + draw_offset[1]), Math.sqrt(density[i][j]), 0, Math.PI * 2);
+                                ctx.fillStyle = "green"
+                                ctx.fill();
+                                ctx.stroke();
                             }
                         }
                     }
@@ -161,7 +165,8 @@
                     for (let ux = 0; ux < velocity_u.length; ux += 1) {
                         for (let uy = velocity_u[0].length - 1; uy >= 0; uy -= 1) {
                             ctx.beginPath();
-                            ctx.arc((ux) * CELL_SIZE[0] + draw_offset[0], BOUNDS[1] - ((uy + 0.5) * CELL_SIZE[1] + draw_offset[1]), Math.abs(velocity_u[ux][uy]) * 0.5, 0, Math.PI * 2);
+                            var v = Math.sqrt(Math.abs(velocity_u[ux][uy])) * 0.5
+                            ctx.arc((ux) * CELL_SIZE[0] + draw_offset[0], BOUNDS[1] - ((uy + 0.5) * CELL_SIZE[1] + draw_offset[1]), v, 0, Math.PI * 2);
                             ctx.fillStyle = "red"
                             ctx.fill();
                             ctx.stroke();
@@ -172,7 +177,8 @@
                     for (let vx = 0; vx < velocity_v.length; vx += 1) {
                         for (let vy = velocity_v[0].length - 1; vy >= 0; vy -= 1) {
                             ctx.beginPath();
-                            ctx.arc((vx + 0.5) * CELL_SIZE[0] + draw_offset[0], BOUNDS[1] -  ((vy) * CELL_SIZE[1] + draw_offset[1]), Math.abs(velocity_v[vx][vy]) * 0.5, 0, Math.PI * 2);
+                            var v = Math.sqrt(Math.abs(velocity_v[vx][vy])) * 0.5
+                            ctx.arc((vx + 0.5) * CELL_SIZE[0] + draw_offset[0], BOUNDS[1] - ((vy) * CELL_SIZE[1] + draw_offset[1]), v, 0, Math.PI * 2);
                             ctx.fillStyle = "green"
                             ctx.fill();
                             ctx.stroke();
@@ -180,9 +186,11 @@
                     }
                 }
 
-                particles.forEach(particle => {
-                    particle.draw(ctx, draw_offset);
-                });
+                if (true) {
+                    particles.forEach(particle => {
+                        particle.draw(ctx, draw_offset);
+                    });
+                }
 
             }
 
@@ -262,7 +270,7 @@
 
 
                     x = particle.position[0] / CELL_SIZE[0] - 0.5
-                    y = particle.position[1] / CELL_SIZE[1]  - 0.5
+                    y = particle.position[1] / CELL_SIZE[1] - 0.5
 
                     i = Math.floor(x)
                     j = Math.floor(y)
@@ -284,14 +292,17 @@
 
                     i = Math.max(0, i)
                     j = Math.max(0, j)
+
+
+                    // I THINK THE WEIGHTS FOR OUTSIDE THE DOMAIN SHOULD BE SET TO 1 FOR DENSITY
                     
                     density[Math.min(i, density.length - 1)][Math.min(j, density[0].length - 1)] += w00
                     density[Math.min(i + 1, density.length - 1)][Math.min(j, density[0].length - 1)] += w10
-                    density[Math.min(i, density.length - 1)][Math.min(j + 1, density[0].length - 1)] += w01 
+                    density[Math.min(i, density.length - 1)][Math.min(j + 1, density[0].length - 1)] += w01
                     density[Math.min(i + 1, density.length - 1)][Math.min(j + 1, density[0].length - 1)] += w11
 
                     x = particle.position[0] / CELL_SIZE[0]
-                    y = particle.position[1] / CELL_SIZE[1]
+                    y = particle.position[1] / CELL_SIZE[1] + 1
 
                     i = Math.max(Math.min(Math.floor(x), type.length - 1), 0)
                     j = Math.max(Math.min(Math.floor(y), type[0].length - 1), 0)
@@ -321,13 +332,13 @@
                 average_density = 0
 
                 for (let i = 0; i < CELL_COUNT; i++) {
-                        for (let j = 0; j < CELL_COUNT; j++) {
-                            if (density[i][j] > 0) {
-                                num_fluid_cells += 1
-                                average_density += density[i][j]
-                            }
+                    for (let j = 0; j < CELL_COUNT; j++) {
+                        if (density[i][j] > 0) {
+                            num_fluid_cells += 1
+                            average_density += density[i][j]
                         }
                     }
+                }
 
 
                 if (num_fluid_cells > 0) average_density /= num_fluid_cells
@@ -376,13 +387,17 @@
 
                 for (let ux = 0; ux < velocity_u.length; ux++) {
                     for (let uy = 0; uy < velocity_u[0].length; uy++) {
-                        velocity_u[ux][uy] += EXTERNAL[0] * dt
+                        if (type[Math.min(ux, type.length - 1)][uy] == 1) {
+                            velocity_u[ux][uy] += EXTERNAL[0] * dt
+                        }
                     }
                 }
 
                 for (let vx = 0; vx < velocity_v.length; vx++) {
                     for (let vy = 0; vy < velocity_v[0].length; vy++) {
-                        velocity_v[vx][vy] += EXTERNAL[1] * dt
+                        if (type[vx][Math.min(vy, type[0].length - 1)] == 1) {
+                            velocity_v[vx][vy] += EXTERNAL[1] * dt
+                        }
                     }
                 }
             }
@@ -394,32 +409,60 @@
                 }
 
                 for (let vx = 0; vx < velocity_v.length; vx++) {
-                    if (velocity_v[vx][0] < 0) velocity_v[vx][0]  = 0
-                    if (velocity_v[vx][velocity_v[0].length - 1] > 0) velocity_v[vx][velocity_v[0].length - 1]  = 0
+                    if (velocity_v[vx][0] < 0) velocity_v[vx][0] = 0
+                    if (velocity_v[vx][velocity_v[0].length - 1] > 0) velocity_v[vx][velocity_v[0].length - 1] = 0
                 }
             }
 
-            function solve_divergence(average_density) {
-                for (let n = 0; n < 5; n++) {
-                    for (let i = 0; i < CELL_COUNT; i++) {
-                        for (let j = 0; j < CELL_COUNT; j++) {
-                            var divergence = 1.9 * (
-                                (velocity_u[i + 1][j] - velocity_u[i][j]) / CELL_SIZE[0] +
-                                (velocity_v[i][j + 1] - velocity_v[i][j]) / CELL_SIZE[1]
-                            ) - 1 * (density[i][j] - average_density * 5);
+            // Function to compute the divergence of the velocity field
+            function compute_divergence(velocity_u, velocity_v, density, CELL_COUNT, CELL_SIZE) {
+                let divergence = [];
+                for (let i = 0; i < CELL_COUNT; i++) {
+                    divergence[i] = [];
+                    for (let j = 0; j < CELL_COUNT; j++) {
+                        divergence[i][j] = 1.9 * (
+                            (velocity_u[i + 1][j] - velocity_u[i][j]) / (2 * CELL_SIZE[0]) +
+                            (velocity_v[i][j + 1] - velocity_v[i][j]) / (2 * CELL_SIZE[1])
+                        ) - 0.5 * (density[i][j]);
+                    }
+                }
+                return divergence;
+            }
 
-                            var borders = (
+
+            // Function to solve divergence
+            function solve_divergence() {
+                const tolerance = 0.1
+                const maxIterations = 25;
+                let divergenceChange = tolerance + 1;
+
+                for (let n = 0; n < maxIterations && divergenceChange > tolerance; n++) {
+                    const previousDivergence = compute_divergence(velocity_u, velocity_v, density, CELL_COUNT, CELL_SIZE);
+
+                    for (let i = 0; i < CELL_COUNT; i++) {work on den
+                        for (let j = 0; j < CELL_COUNT; j++) {
+                            const borders = (
                                 in_bounds(i - 1, j, CELL_COUNT, CELL_COUNT) +
                                 in_bounds(i + 1, j, CELL_COUNT, CELL_COUNT) +
                                 in_bounds(i, j - 1, CELL_COUNT, CELL_COUNT) +
                                 in_bounds(i, j + 1, CELL_COUNT, CELL_COUNT)
-                            )
+                            );
 
-                            velocity_u[i][j] += divergence * in_bounds(i - 1, j, CELL_COUNT, CELL_COUNT) / borders
-                            velocity_u[i + 1][j] -= divergence * in_bounds(i + 1, j, CELL_COUNT, CELL_COUNT) / borders
+                            const divergence = previousDivergence[i][j];
+                            velocity_u[i][j] += divergence * in_bounds(i - 1, j, CELL_COUNT, CELL_COUNT) / borders;
+                            velocity_u[i + 1][j] -= divergence * in_bounds(i + 1, j, CELL_COUNT, CELL_COUNT) / borders;
+                            velocity_v[i][j] += divergence * in_bounds(i, j - 1, CELL_COUNT, CELL_COUNT) / borders;
+                            velocity_v[i][j + 1] -= divergence * in_bounds(i, j + 1, CELL_COUNT, CELL_COUNT) / borders;
+                        }
+                    }
 
-                            velocity_v[i][j] += divergence * in_bounds(i, j - 1, CELL_COUNT, CELL_COUNT) / borders
-                            velocity_v[i][j + 1] -= divergence * in_bounds(i, j + 1, CELL_COUNT, CELL_COUNT) / borders
+                    const currentDivergence = compute_divergence(velocity_u, velocity_v, density, CELL_COUNT, CELL_SIZE);
+
+                    // Compute the change in divergence
+                    divergenceChange = 0;
+                    for (let i = 0; i < CELL_COUNT; i++) {
+                        for (let j = 0; j < CELL_COUNT; j++) {
+                            divergenceChange += Math.abs(currentDivergence[i][j] - previousDivergence[i][j]);
                         }
                     }
                 }
@@ -428,8 +471,8 @@
             function particle_from_grid(dt) {
                 // Advect particles
                 particles.forEach(particle => {
-                    
-                    integrated_position = [particle.position[0] + particle.velocity[0] * dt, particle.position[1] +  particle.velocity[1] * dt]
+
+                    integrated_position = [particle.position[0] + particle.velocity[0] * dt, particle.position[1] + particle.velocity[1] * dt]
 
                     x = integrated_position[0] / CELL_SIZE[0]
                     y = integrated_position[1] / CELL_SIZE[1] - 0.5
@@ -450,10 +493,10 @@
 
 
                     w00 = (1 - dx) * (1 - dy) * (b00 && type[Math.min(i, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
-                    w10 = (dx) * (1 - dy) * (b10 && type[Math.min(i+1, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
-                    w01 = (1 - dx) * (dy) * (b01 && type[Math.min(i, type.length - 1)][Math.min(j+1, type[0].length - 1)] == 1)
-                    w11 = (dx) * (dy) * (b11 && type[Math.min(i+1, type.length - 1)][Math.min(j+1, type[0].length - 1)] == 1)
-                    
+                    w10 = (dx) * (1 - dy) * (b10 && type[Math.min(i + 1, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
+                    w01 = (1 - dx) * (dy) * (b01 && type[Math.min(i, type.length - 1)][Math.min(j + 1, type[0].length - 1)] == 1)
+                    w11 = (dx) * (dy) * (b11 && type[Math.min(i + 1, type.length - 1)][Math.min(j + 1, type[0].length - 1)] == 1)
+
                     total_weight = w00 + w10 + w01 + w11
 
                     var vel_u = (
@@ -483,9 +526,9 @@
                     j = Math.max(0, j)
 
                     w00 = (1 - dx) * (1 - dy) * (b00 && type[Math.min(i, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
-                    w10 = (dx) * (1 - dy) * (b10 && type[Math.min(i+1, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
-                    w01 = (1 - dx) * (dy) * (b01 && type[Math.min(i, type.length - 1)][Math.min(j+1, type[0].length - 1)] == 1)
-                    w11 = (dx) * (dy) * (b11 && type[Math.min(i+1, type.length - 1)][Math.min(j+1, type[0].length - 1)] == 1)
+                    w10 = (dx) * (1 - dy) * (b10 && type[Math.min(i + 1, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
+                    w01 = (1 - dx) * (dy) * (b01 && type[Math.min(i, type.length - 1)][Math.min(j + 1, type[0].length - 1)] == 1)
+                    w11 = (dx) * (dy) * (b11 && type[Math.min(i + 1, type.length - 1)][Math.min(j + 1, type[0].length - 1)] == 1)
 
                     total_weight = w00 + w10 + w01 + w11
 
@@ -518,10 +561,10 @@
 
 
                     w00 = (1 - dx) * (1 - dy) * (b00 && type[Math.min(i, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
-                    w10 = (dx) * (1 - dy) * (b10 && type[Math.min(i+1, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
-                    w01 = (1 - dx) * (dy) * (b01 && type[Math.min(i, type.length - 1)][Math.min(j+1, type[0].length - 1)] == 1)
-                    w11 = (dx) * (dy) * (b11 && type[Math.min(i+1, type.length - 1)][Math.min(j+1, type[0].length - 1)] == 1)
-                    
+                    w10 = (dx) * (1 - dy) * (b10 && type[Math.min(i + 1, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
+                    w01 = (1 - dx) * (dy) * (b01 && type[Math.min(i, type.length - 1)][Math.min(j + 1, type[0].length - 1)] == 1)
+                    w11 = (dx) * (dy) * (b11 && type[Math.min(i + 1, type.length - 1)][Math.min(j + 1, type[0].length - 1)] == 1)
+
                     total_weight = w00 + w10 + w01 + w11
 
                     var last_vel_u = (
@@ -551,9 +594,9 @@
                     j = Math.max(0, j)
 
                     w00 = (1 - dx) * (1 - dy) * (b00 && type[Math.min(i, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
-                    w10 = (dx) * (1 - dy) * (b10 && type[Math.min(i+1, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
-                    w01 = (1 - dx) * (dy) * (b01 && type[Math.min(i, type.length - 1)][Math.min(j+1, type[0].length - 1)] == 1)
-                    w11 = (dx) * (dy) * (b11 && type[Math.min(i+1, type.length - 1)][Math.min(j+1, type[0].length - 1)] == 1)
+                    w10 = (dx) * (1 - dy) * (b10 && type[Math.min(i + 1, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
+                    w01 = (1 - dx) * (dy) * (b01 && type[Math.min(i, type.length - 1)][Math.min(j + 1, type[0].length - 1)] == 1)
+                    w11 = (dx) * (dy) * (b11 && type[Math.min(i + 1, type.length - 1)][Math.min(j + 1, type[0].length - 1)] == 1)
 
                     total_weight = w00 + w10 + w01 + w11
 
@@ -568,7 +611,7 @@
 
 
 
-                    flipFac = 0.5
+                    flipFac = 0.1
 
                     particle.velocity[0] = (vel_u) * (1 - flipFac) + (particle.velocity[0] + vel_u - last_vel_u) * flipFac
                     particle.velocity[1] = (vel_v) * (1 - flipFac) + (particle.velocity[1] + vel_v - last_vel_v) * flipFac
@@ -612,12 +655,12 @@
 
                     // Push neighboring particles into the array
                     var neighboringParticles = getParticlesFromHashTable(i, j);
-                    
+
 
                     // Handle particle collisions
                     neighboringParticles.forEach(other => {
                         if (particle !== other) { // Ensure we're not checking the particle against itself
-                        
+
                             var dx = other.position[0] - particle.position[0];
                             var dy = other.position[1] - particle.position[1];
                             const dist_squared = dx * dx + dy * dy;
@@ -640,7 +683,7 @@
 
                                 // Move particles apart proportionally to their overlap
                                 const moveX = dx * overlap * 0.5;
-                                const moveY = dy* overlap * 0.5;
+                                const moveY = dy * overlap * 0.5;
 
                                 // Move the particles in opposite directions
                                 particle.position[0] -= moveX;
@@ -680,6 +723,8 @@
             function clear() {
                 last_velocity_u = new Array(CELL_COUNT + 1).fill(0).map(() => new Array(CELL_COUNT).fill(0));
                 last_velocity_v = new Array(CELL_COUNT).fill(0).map(() => new Array(CELL_COUNT + 1).fill(0));
+                velocity_u = new Array(CELL_COUNT + 1).fill(0).map(() => new Array(CELL_COUNT).fill(0));
+                velocity_v = new Array(CELL_COUNT).fill(0).map(() => new Array(CELL_COUNT + 1).fill(0));
                 density = new Array(CELL_COUNT).fill(0).map(() => new Array(CELL_COUNT).fill(0));
                 type = new Array(CELL_COUNT).fill(0).map(() => new Array(CELL_COUNT).fill(0));
             }
