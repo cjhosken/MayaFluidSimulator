@@ -292,6 +292,14 @@
 
                     i = Math.max(0, i)
                     j = Math.max(0, j)
+                  
+
+                    if (total_weight > 0) {
+                      w00 /= total_weight 
+                      w10 /= total_weight 
+                      w01 /= total_weight 
+                      w11 /= total_weight
+                    }
 
 
                     // I THINK THE WEIGHTS FOR OUTSIDE THE DOMAIN SHOULD BE SET TO 1 FOR DENSITY
@@ -308,8 +316,6 @@
                     j = Math.max(Math.min(Math.floor(y), type[0].length - 1), 0)
 
                     type[i][j] = 1
-
-                })
 
                 for (let ux = 0; ux < velocity_u.length; ux++) {
                     for (let uy = 0; uy < velocity_u[0].length; uy++) {
