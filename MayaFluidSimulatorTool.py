@@ -601,28 +601,28 @@ class MFS_Grid():
             j = max(j, 0)
             k = max(k, 0)
 
-            self.velocity_v[min(i, self.resolution[0] - 1)][min(j, self.resolution[1])][min(k, self.resolution[2] - 1)] += p.velocity[0] * w000
+            self.velocity_v[min(i, self.resolution[0] - 1)][min(j, self.resolution[1])][min(k, self.resolution[2] - 1)] += p.velocity[1] * w000
             weight_v[min(i, self.resolution[0] - 1)][min(j, self.resolution[1])][min(k, self.resolution[2] - 1)] += w000
 
-            self.velocity_v[min(i + 1, self.resolution[0] - 1)][min(j, self.resolution[1])][min(k, self.resolution[2] - 1)] += p.velocity[0] * w100
+            self.velocity_v[min(i + 1, self.resolution[0] - 1)][min(j, self.resolution[1])][min(k, self.resolution[2] - 1)] += p.velocity[1] * w100
             weight_v[min(i + 1, self.resolution[0] - 1)][min(j, self.resolution[1])][min(k, self.resolution[2] - 1)] += w100
 
-            self.velocity_v[min(i, self.resolution[0] - 1)][min(j + 1, self.resolution[1])][min(k, self.resolution[2] - 1)] += p.velocity[0] * w010
+            self.velocity_v[min(i, self.resolution[0] - 1)][min(j + 1, self.resolution[1])][min(k, self.resolution[2] - 1)] += p.velocity[1] * w010
             weight_v[min(i, self.resolution[0] - 1)][min(j + 1, self.resolution[1])][min(k, self.resolution[2] - 1)] += w010
 
-            self.velocity_v[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1])][min(k, self.resolution[2] - 1)] += p.velocity[0] * w110
+            self.velocity_v[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1])][min(k, self.resolution[2] - 1)] += p.velocity[1] * w110
             weight_v[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1])][min(k, self.resolution[2] - 1)] += w110
 
-            self.velocity_v[min(i, self.resolution[0] - 1)][min(j, self.resolution[1])][min(k + 1, self.resolution[2] - 1)] += p.velocity[0] * w001
+            self.velocity_v[min(i, self.resolution[0] - 1)][min(j, self.resolution[1])][min(k + 1, self.resolution[2] - 1)] += p.velocity[1] * w001
             weight_v[min(i, self.resolution[0] - 1)][min(j, self.resolution[1])][min(k + 1, self.resolution[2] - 1)] += w001
 
-            self.velocity_v[min(i, self.resolution[0] - 1)][min(j+1, self.resolution[1])][min(k+1, self.resolution[2] - 1)] += p.velocity[0] * w011
+            self.velocity_v[min(i, self.resolution[0] - 1)][min(j+1, self.resolution[1])][min(k+1, self.resolution[2] - 1)] += p.velocity[1] * w011
             weight_v[min(i, self.resolution[0] - 1)][min(j+1, self.resolution[1])][min(k + 1, self.resolution[2] - 1)] += w011
 
-            self.velocity_v[min(i+1, self.resolution[0] - 1)][min(j, self.resolution[1])][min(k+1, self.resolution[2] - 1)] += p.velocity[0] * w101
+            self.velocity_v[min(i+1, self.resolution[0] - 1)][min(j, self.resolution[1])][min(k+1, self.resolution[2] - 1)] += p.velocity[1] * w101
             weight_v[min(i+1, self.resolution[0] - 1)][min(j, self.resolution[1])][min(k+1, self.resolution[2] - 1)] += w101
 
-            self.velocity_v[min(i+1, self.resolution[0] - 1)][min(j+1, self.resolution[1])][min(k+1, self.resolution[2] - 1)] += p.velocity[0] * w111
+            self.velocity_v[min(i+1, self.resolution[0] - 1)][min(j+1, self.resolution[1])][min(k+1, self.resolution[2] - 1)] += p.velocity[1] * w111
             weight_v[min(i+1, self.resolution[0] - 1)][min(j+1, self.resolution[1])][min(k+1, self.resolution[2] - 1)] += w111
 
 
@@ -635,32 +635,32 @@ class MFS_Grid():
             j = max(j, 0)
             k = max(k, 0)
 
-            self.velocity_w[min(i, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k, self.resolution[2])] += p.velocity[0] * w000
+            self.velocity_w[min(i, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k, self.resolution[2])] += p.velocity[2] * w000
             weight_w[min(i, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k, self.resolution[2])] += w000
 
-            self.velocity_w[min(i + 1, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k, self.resolution[2])] += p.velocity[0] * w100
+            self.velocity_w[min(i + 1, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k, self.resolution[2])] += p.velocity[2] * w100
             weight_w[min(i + 1, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k, self.resolution[2])] += w100
 
-            self.velocity_w[min(i, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k, self.resolution[2])] += p.velocity[0] * w010
+            self.velocity_w[min(i, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k, self.resolution[2])] += p.velocity[2] * w010
             weight_w[min(i, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k, self.resolution[2])] += w010
 
-            self.velocity_w[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k, self.resolution[2])] += p.velocity[0] * w110
+            self.velocity_w[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k, self.resolution[2])] += p.velocity[2] * w110
             weight_w[min(i + 1, self.resolution[0] - 1)][min(j + 1, self.resolution[1] - 1)][min(k, self.resolution[2])] += w110
 
-            self.velocity_w[min(i, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k + 1, self.resolution[2])] += p.velocity[0] * w001
+            self.velocity_w[min(i, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k + 1, self.resolution[2])] += p.velocity[2] * w001
             weight_w[min(i, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k + 1, self.resolution[2])] += w001
 
-            self.velocity_w[min(i, self.resolution[0] - 1)][min(j+1, self.resolution[1] - 1)][min(k+1, self.resolution[2])] += p.velocity[0] * w011
+            self.velocity_w[min(i, self.resolution[0] - 1)][min(j+1, self.resolution[1] - 1)][min(k+1, self.resolution[2])] += p.velocity[2] * w011
             weight_w[min(i, self.resolution[0] - 1)][min(j+1, self.resolution[1] - 1)][min(k + 1, self.resolution[2])] += w011
 
-            self.velocity_w[min(i+1, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k+1, self.resolution[2])] += p.velocity[0] * w101
+            self.velocity_w[min(i+1, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k+1, self.resolution[2])] += p.velocity[2] * w101
             weight_w[min(i+1, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k+1, self.resolution[2])] += w101
 
-            self.velocity_w[min(i+1, self.resolution[0] - 1)][min(j+1, self.resolution[1] - 1)][min(k+1, self.resolution[2])] += p.velocity[0] * w111
+            self.velocity_w[min(i+1, self.resolution[0] - 1)][min(j+1, self.resolution[1] - 1)][min(k+1, self.resolution[2])] += p.velocity[2] * w111
             weight_w[min(i+1, self.resolution[0] - 1)][min(j+1, self.resolution[1] - 1)][min(k+1, self.resolution[2])] += w111
 
             # SOLVE DENSITY
-            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([-0.5, -0.5, -0.5]))
+            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([0.5, 0.5, 0.5]))
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.density)
 
             i = max(i, 0)
@@ -677,7 +677,7 @@ class MFS_Grid():
             self.density[min(i + 1, self.resolution[0]  - 1)][min(j + 1, self.resolution[1]  - 1)][min(k + 1, self.resolution[2]  - 1)] += w111
             
         
-            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([0.5, 0.5, 0.5]))
+            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([0, 0, 0]))
 
             i = max(i, 0)
             j = max(j, 0)
@@ -757,10 +757,9 @@ class MFS_Grid():
         max_dist = np.linalg.norm(self.cell_size) * np.linalg.norm(external_force)
 
         if (max_speed <= 0):
-            return timescale
+            max_speed = 1
 
-
-        return min(timescale, timescale * max_dist / max_speed, 1)
+        return min(timescale, max(timescale * max_dist / max_speed, 1))
 
     def apply_forces(self, external_force, dt):
         for u in range(self.resolution[0] + 1):
@@ -783,22 +782,22 @@ class MFS_Grid():
             for uz in range(self.resolution[2] ):
                 if (self.velocity_u[0][uy][uz] < 0): 
                     self.velocity_u[0][uy][uz] = 0
-                if (self.velocity_u[self.resolution[0] - 1][uy][uz] > 0):
-                    self.velocity_u[self.resolution[0] - 1][uy][uz] = 0
+                if (self.velocity_u[self.resolution[0]][uy][uz] > 0):
+                    self.velocity_u[self.resolution[0]][uy][uz] = 0
 
         for vx in range(self.resolution[0]):
             for vz in range(self.resolution[2]):
                 if (self.velocity_v[vx][0][vz] < 0): 
                     self.velocity_v[vx][0][vz] = 0
-                if (self.velocity_v[vx][self.resolution[1] - 1][vz] > 0):
-                    self.velocity_v[vx][self.resolution[1] - 1][vz] = 0
+                if (self.velocity_v[vx][self.resolution[1]][vz] > 0):
+                    self.velocity_v[vx][self.resolution[1]][vz] = 0
         
         for wx in range(self.resolution[0]):
             for wy in range(self.resolution[0]):
                 if (self.velocity_w[wx][wy][0] < 0): 
                     self.velocity_w[wx][wy][0] = 0
-                if (self.velocity_w[wx][wy][self.resolution[2] - 1] > 0):
-                    self.velocity_w[wx][wy][self.resolution[2] - 1] = 0
+                if (self.velocity_w[wx][wy][self.resolution[2]] > 0):
+                    self.velocity_w[wx][wy][self.resolution[2]] = 0
 
     def solve_divergence(self, iterations, overrelaxation, stiffness, rest_density):
         for n in range(iterations):
@@ -911,7 +910,7 @@ class MFS_Grid():
             last_velocity = np.zeros(3)
 
             p.integrate(current_velocity, last_velocity, flipFac, bbox, dt)
-            self.insert_particle_into_hash_table(p)
+            self.insert_particle_into_hash_table(p, bbox, np.zeros(3))
 
     def handle_collisions_and_boundary(self, particles, bbox, pscale):
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
@@ -941,9 +940,7 @@ class MFS_Grid():
                 particle.velocity[2] *= 0
                 particle.position[2] = max_z - r
 
-            i = int(particle.position[0] // self.cell_size[0])
-            j = int(particle.position[1] // self.cell_size[1])
-            k = int(particle.position[2] // self.cell_size[2])
+            x, y, z, i, j, k = self.get_grid_coords(bbox, particle.position, np.zeros(3))
 
             # Push neighboring particles into the array
             neighboring_particles = self.get_particles_from_hash_table(i, j, k)
@@ -959,8 +956,8 @@ class MFS_Grid():
 
                     if dist_squared < min_dist_squared:
                         # Swap velocities
-                        temp_velocity = particle.velocity[:]
-                        particle.velocity = other.velocity[:]
+                        temp_velocity = particle.velocity
+                        particle.velocity = other.velocity
                         other.velocity = temp_velocity
 
                         # Calculate the direction of the collision
@@ -985,14 +982,14 @@ class MFS_Grid():
                         other.position[1] += moveY
                         other.position[2] += moveZ
 
-            self.insert_particle_into_hash_table(particle)
+            self.insert_particle_into_hash_table(particle, bbox, np.zeros(3))
     
     def get_velocity(self, velu, velv, velw, i, j, k):
         return np.array([
             velu[i + 1][j][k] - velu[i][j][k],
             velv[i][j+1][k] - velv[i][j][k],
             velw[i][j][k+1] - velw[i][j][k]
-        ]) / 2 * self.cell_size
+        ]) / self.cell_size
     
     def get_grid_coords(self, bbox, position, offset):
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
@@ -1008,10 +1005,8 @@ class MFS_Grid():
     
     # CHAT GPT START
     
-    def insert_particle_into_hash_table(self, particle):
-        i = int(particle.position[0] // self.cell_size[0])
-        j = int(particle.position[1] // self.cell_size[1])
-        k = int(particle.position[2] // self.cell_size[2])
+    def insert_particle_into_hash_table(self, particle, bbox, offset):
+        x, y, z, i ,j, k = self.get_grid_coords(bbox, particle.position, offset)
         hash_val = self.hash_coords(i, j, k)
 
         if hash_val not in self.particleHashTable:
