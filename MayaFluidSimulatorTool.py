@@ -13,13 +13,18 @@ from maya.api import OpenMaya as om
 import os
 import random
 import re
-import math
 
-''' Maya Fluid Simulator uses two external modules, numpy and scipy. Users will need to manually install these modules using the commands below.
+''' Maya Fluid Simulator uses numpy. Users will need to manually install numpy using the commands below.
 
-    Windows         : "C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" -m pip install --user numpy scipy
+    Windows:
+    "C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" -m pip install --user numpy
 
-    Linux           : /usr/autodesk/maya2023/bin/mayapy -m pip install --user numpy scipy
+    Linux:
+    /usr/autodesk/maya2023/bin/mayapy -m pip install --user numpy
+
+    Mac:
+    /Applications/Autodesk/maya2023/Maya.app/Contents/bin/mayapy -m pip install –user numpy
+
 
     Make sure that the correct maya version is being used.    
 '''
