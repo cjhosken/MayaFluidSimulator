@@ -31,27 +31,29 @@ import re
 
 import numpy as np
 
-''' The MFS Plugin is a general class that contains the (mainly) Maya side of the script. This allows the use of "global" variables in a contained setting. '''
 class MFS_Plugin():
+    ''' The MFS Plugin is a general class that contains the (mainly) Maya side of the script. This allows the use of "global" variables in a contained setting. '''
     
     # "global" variables
     popup_size = (500, 450)
     button_ratio = 0.9
 
-
-    ''' __init__ initializes the plugin by creating the header menu. '''
     def __init__(self):
+        ''' __init__ initializes the plugin by creating the header menu. '''
+
         self.MFS_create_menu()
 
 
-    ''' MFS_create_menu deletes any pre-existing Maya Fluid Simulator header menus, then creates a new header menu.'''
     def MFS_create_menu(self):
+        ''' MFS_create_menu deletes any pre-existing Maya Fluid Simulator header menus, then creates a new header menu.'''
+
         self.MFS_delete_menu()
         cmds.menu("MFS_menu", label="Maya Fluid Simulator", parent="MayaWindow", tearOff=False)
         cmds.menuItem(label="Open Maya Fluid Simulator", command=lambda x:self.MFS_popup())
     
 
-    ''' MFS_popip creates the main UI for Maya Fluid Simulator. 
+    def MFS_popup(self):
+        ''' MFS_popip creates the main UI for Maya Fluid Simulator. 
 
         Particle Scale         : The visual size of the particles
         Cell Size              : The cell width for particle sourcing and simulation
@@ -71,8 +73,7 @@ class MFS_Plugin():
         Simulate (X)           : Simulate the fluid particles. X will remove the keyframed simulation. 
 
         Setting the Maya project dir to the script location shows the plugin icons.
-    '''
-    def MFS_popup(self):
+        '''
         
         cmds.window(title="Maya Fluid Simulator", widthHeight=self.popup_size)
         col = cmds.columnLayout(adjustableColumn=True)
@@ -96,7 +97,6 @@ class MFS_Plugin():
         self.force_ctrl = cmds.floatFieldGrp(numberOfFields=3, label='Force', extraLabel='cm', value1=0, value2=-9.8, value3=0 )
         self.vel_ctrl = cmds.floatFieldGrp( numberOfFields=3, label='Initial Velocity', extraLabel='cm', value1=0, value2=0, value3=0 )
 
-        self.density_ctrl = cmds.floatSliderGrp(minValue=0, maxValue=2000, step=0.01, value=998.2, field=True, label="Fluid Density")
         self.stiff_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=1, field=True, label="Stiffness")
         self.relax_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=1.5, field=True, label="Overrelaxation")
         self.iter_ctrl = cmds.intSliderGrp(minValue=0, value=5, field=True, label="Iterations")
@@ -119,14 +119,16 @@ class MFS_Plugin():
         cmds.showWindow()
 
 
-    ''' MFS_delete_menu checks if the Maya Fluid Simulator header menu exists and deletes it. '''
+    
     def MFS_delete_menu(self):
+        ''' MFS_delete_menu checks if the Maya Fluid Simulator header menu exists and deletes it. '''
+
         if cmds.menu("MFS_menu", exists=True):
             cmds.deleteUI("MFS_menu", menu=True)
 
 
-    ''' MFS_initialize uses the initialization settings to fill a selected object with fluid particles and to create a domain object. '''
     def MFS_initialize(self):
+        ''' MFS_initialize uses the initialization settings to fill a selected object with fluid particles and to create a domain object. '''
         source = self.get_active_object()
         
         if (source is not None):
@@ -186,8 +188,8 @@ class MFS_Plugin():
             cmds.select(source)
 
 
-    ''' MFS_simulate begins the Maya Fluid Simulation from the given fluid settings. '''
     def MFS_simulate(self):
+        ''' MFS_simulate begins the Maya Fluid Simulation from the given fluid settings. '''
 
         source = self.get_active_object()
 
@@ -198,7 +200,6 @@ class MFS_Plugin():
             timescale = cmds.floatSliderGrp(self.ts_ctrl, query=True, value=True)
             external_force = cmds.floatFieldGrp(self.force_ctrl, query=True, value=True)
 
-            fluid_density = cmds.floatSliderGrp(self.density_ctrl, query=True, value=True)
             pscale = cmds.floatSliderGrp(self.pscale_ctrl, query=True, value=True)
             flipFac = cmds.floatSliderGrp(self.picflip_ctrl, query=True, value=True)
             iterations = cmds.intSliderGrp(self.iter_ctrl, query=True, value=True)
@@ -229,7 +230,6 @@ class MFS_Plugin():
 
             size = np.array([abs(max_x - min_x), abs(max_y - min_y), abs(max_z - min_z)])
             
-
             resx = int(cmds.polyCube(source + "_domain", query=True, subdivisionsX=True))
             resy = int(cmds.polyCube(source + "_domain", query=True, subdivisionsY=True))
             resz = int(cmds.polyCube(source + "_domain", query=True, subdivisionsZ=True))
@@ -245,10 +245,12 @@ class MFS_Plugin():
             cmds.progressWindow(title='Simulating', progress=0, status='Progress: 0%', isInterruptable=True, maxValue=(frame_range[1]-frame_range[0]))
             
             # The simulation is then properly started in update.
-            self.update(source, particles, grid, frame_range, timescale, external_force, fluid_density, pscale, flipFac, iterations, overrelaxation, stiffness, 0)
+            self.update(source, particles, grid, frame_range, timescale, external_force, pscale, flipFac, iterations, overrelaxation, stiffness, 0)
 
 
-    ''' update is the start of an actual Fluid Simulator. It simulates the particle position frame by frame, keyframing the positions each time. 
+    
+    def update(self, source, particles, grid, frame_range, timescale, external_force, pscale, flipFac, iterations, overrelaxation, stiffness, progress):
+        ''' update is the start of an actual Fluid Simulator. It simulates the particle position frame by frame, keyframing the positions each time. 
         The user is then able to cancel the simulation by pressing Esc, however they need to wait for the current frame to finish simulation.
     
         source                  : The fluid source object
@@ -257,16 +259,14 @@ class MFS_Plugin():
         frame_range             : The range in the which simulation should run between.
         timescale               : The speed of the simulation.
         external_force          : The external forces acting on the fluid. Usually gravity.
-        fluid_density*          : The density of the fluid.
-        viscosity_factor*       : The amount of fluid viscosity.
         damping                 : The damping factor for particle-ground collisions.
-        pscale*                 : The size of the particles.
+        pscale                  : The size of the particles.
         flipFac                 : The blending from PIC (0) -> (1) FLIP. 
         progress                : Used to track the progress bar.
 
         The reason why so many values are being parsed through the update function is to avoid settings changing midway though simulation.
-    '''
-    def update(self, source, particles, grid, frame_range, timescale, external_force, fluid_density, pscale, flipFac, iterations, overrelaxation, stiffness, progress):
+        '''
+        
         percent = (progress / (frame_range[1] - frame_range[0])) * 100
 
         cmds.progressWindow(e=1, progress=progress, status=f'Progress: {percent:.1f}%')
@@ -281,12 +281,13 @@ class MFS_Plugin():
         #
         # 1. keyframe frame: copy the particle positions in the simulation onto the maya particle objects.
         # 2. enter the CFL domain. This is done to limit particles travelling only 1 cell at a time.
-        # 3. from_particles: transfer the point velocities to the grid using trilinear interpolation.
-        # 4. calc_timestep: find the timestep. This will differ from cfl iteration to iteration, but at maximum is the timescale.
-        # 5. calc_forces: calculate external forces such as gravity.
+        # 3. particles_to_grid: transfer the point velocities to the grid using trilinear interpolation.
+        # 4. calc_dt: find the timestep. This will differ from cfl iteration to iteration, but at maximum is the timescale.
+        # 5. apply_forces: calculate external forces such as gravity.
         # 6. enforce_boundaries: stop any edge cell velocities from pointing out of the domain. This is done by setting the velocity component to 0.
-        # 7. solve_poission: solve the possion equation that makes the fluid divergence free.
-        # 8. to_particles: transfer the grid velocities back into the particles, then move the particles.
+        # 7. solve_divergence: solve the possion equation that makes the fluid divergence free.
+        # 8. grid_to_particles: transfer the grid velocities back into the particles, then move the particles.
+        # 9. handle_collisions_and_boundary: Check for particle collisions and move any escaping particles back into the simulation domain.
         #
         # Once the cfl iterations are complete, the next frame is done until all the frames within the frame range are simulated.
 
@@ -311,28 +312,29 @@ class MFS_Plugin():
 
             cmds.currentTime(t + 1, edit=True)
 
-            self.update(source, particles, grid, frame_range, timescale, external_force, fluid_density, pscale, flipFac, iterations, overrelaxation, stiffness, progress=progress+1)
+            self.update(source, particles, grid, frame_range, timescale, external_force, pscale, flipFac, iterations, overrelaxation, stiffness, progress=progress+1)
         else:
             cmds.currentTime(frame_range[0], edit=True)
             cmds.progressWindow(endProgress=1)
 
 
-    ''' keyframe take the simulation particles, copies their position into the corresponding Maya particles, then keyframes the positions.
+    def keyframe(self, source, particles, t):
+        ''' keyframe take the simulation particles, copies their position into the corresponding Maya particles, then keyframes the positions.
 
         source          : The source object
         particles       : The array containing MFS_Particles
         t               : the current frame value
 
-    '''
-    def keyframe(self, source, particles, t):
+        '''
         for p in particles:
             particle_name = f"{source}_particle_{p.id:09}"
             cmds.setKeyframe(particle_name, attribute='translateX', t=t, v=p.position[0])
             cmds.setKeyframe(particle_name, attribute='translateY', t=t, v=p.position[1])
             cmds.setKeyframe(particle_name, attribute='translateZ', t=t, v=p.position[2])
 
-    ''' MFS_delete deletes all the particles and the domain, and revert back the source object.'''
+    
     def MFS_delete(self):
+        ''' MFS_delete deletes all the particles and the domain, and revert back the source object.'''
         source = self.get_active_object()
 
         if (source is not None):
@@ -349,8 +351,9 @@ class MFS_Plugin():
                 cmds.delete(domain_name)
     
 
-    ''' MFS_reset resets the simulation by deleting all the keyframes and setting the current time to the start of the frame range.'''
+
     def MFS_reset(self):
+        ''' MFS_reset resets the simulation by deleting all the keyframes and setting the current time to the start of the frame range.'''
         source = self.get_active_object()
         frame_range = cmds.intFieldGrp(self.time_ctrl, query=True, value=True)
         cmds.currentTime(frame_range[0], edit=True)
@@ -364,11 +367,12 @@ class MFS_Plugin():
                 cmds.cutKey(p, attribute='translateZ', clear=True)
 
 
-    ''' get_active_object checks if the selected object can be a "source" object.
+
+    def get_active_object(self):
+        ''' get_active_object checks if the selected object can be a "source" object.
         An object can be a source object if it is not a domain or a particle.
         Otherwise None is returned.
-    '''
-    def get_active_object(self):
+        '''
         selected_objects = cmds.ls(selection=True)
 
         if (selected_objects):
@@ -386,12 +390,13 @@ class MFS_Plugin():
         return None
 
 
-    ''' can_simulate checks if the selected object has been sourced. To do so, it looks to see if a domain and particle group exist for the object.
+    
+    def can_simulate(self, source):
+        ''' can_simulate checks if the selected object has been sourced. To do so, it looks to see if a domain and particle group exist for the object.
         
         source          : The selected object to test
     
-    '''
-    def can_simulate(self, source):
+        '''
         can_simulate = cmds.objExists(source + "_domain") and cmds.objExists(source + "_particles")
 
         if (not can_simulate):
@@ -403,15 +408,15 @@ class MFS_Plugin():
         return can_simulate
     
 
-    ''' mesh_to_points generates points inside of a given object.
+    def mesh_to_points(self, mesh, cell_size, samples=0):
+        ''' mesh_to_points generates points inside of a given object.
         It creates a domain around the source object and splits it into subdivisions, then It creates a domain around the source object and splits it into subdivisions. 
 
         mesh                : the mesh to convert to points
         cell_size           : the spacing between particles. This is a scalar as we want the point generation to be uniform.
         samples             : the number of particles to randomly generate inside a cell. When 0, the particles assume a grid formation.
     
-    '''
-    def mesh_to_points(self, mesh, cell_size, samples=0):
+        '''
     
         bbox = cmds.exactWorldBoundingBox(mesh)
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
@@ -447,7 +452,9 @@ class MFS_Plugin():
         return points
 
 
-    ''' is_point_inside_mesh checks if a point is inside a specific mesh.
+    
+    def is_point_inside_mesh(self, point, mesh):
+        ''' is_point_inside_mesh checks if a point is inside a specific mesh.
         To do this, a ray is fired from (at a random direciton) the point. 
         If the ray interescts with the mesh an uneven number of times, the point is inside the mesh.
 
@@ -455,8 +462,7 @@ class MFS_Plugin():
         mesh        : the mesh to check if the point is in
         
         This only works if the mesh is enclosed, any gaps in the geometry can lead to unstable results.
-    '''
-    def is_point_inside_mesh(self, point, mesh):
+        '''
         direction = om.MVector(random.random(), random.random(), random.random())
         
         selection_list = om.MSelectionList()
@@ -484,24 +490,27 @@ class MFS_Plugin():
 
 
 
-''' The MFS_Particle class is used to store the simulation particle data. '''
-class MFS_Particle():
 
-    ''' __init__ initializes the particle
+class MFS_Particle():
+    ''' The MFS_Particle class is used to store the simulation particle data. '''
+
+    def __init__(self, id, pos, vel) -> None:
+        ''' __init__ initializes the particle
         
         id              : The point id, this is used to match the MFS_Particle to the corresponding maya particle object.
         pos             : The position of the particle. Eg: (0.0, 2.0, 0.0)
         vel             : The velocity of the particle. Eg: (-3.0, -2.0, 0.0)
     
-    '''
-    def __init__(self, id, pos, vel) -> None:
+        '''
+
         self.id = id
         self.position = pos
         self.velocity = vel
-        self.mass = 0.1
+        
 
 
-    ''' advect takes the interpolated velocity from the grid and adds it to the particle.
+    def integrate(self, current_velocity, last_velocity, flipFac, bbox, dt):
+        ''' advect takes the interpolated velocity from the grid and adds it to the particle.
 
         bbox            : The bounding box of the simulation domain.
         velocity        : The current velocity.
@@ -510,9 +519,8 @@ class MFS_Particle():
         dt              : The timestep.
         flipFac         : The blending from PIC (0) -> (1) FLIP. 
 
-    '''
-    def integrate(self, current_velocity, last_velocity, flipFac, bbox, dt):
-        # Update velocity based on interpolated grid velocity
+        '''
+
         pic = current_velocity
 
         flip = self.velocity + (current_velocity - last_velocity)
@@ -523,7 +531,8 @@ class MFS_Particle():
         
 
 
-''' The MFS_Grid does most of the calculations for the simulation. Specifically:
+class MFS_Grid():
+    ''' The MFS_Grid does most of the calculations for the simulation. Specifically:
 
     Particle->Grid and Grid->Particle
     Time-step calculation
@@ -531,8 +540,8 @@ class MFS_Particle():
     enforcing boundaries
     possion equation solving
 
-'''
-class MFS_Grid():
+    '''
+
     def __init__(self, resolution, cell_size):
         self.resolution = resolution
         self.cell_size = cell_size
