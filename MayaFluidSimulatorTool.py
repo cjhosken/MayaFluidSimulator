@@ -488,7 +488,13 @@ class MFS_Plugin():
 
 
 
-""" ---------- The script below is the main fluid simulation code. In the case of needing this for future projects, this is where you should be looking. ---------- """
+""" ---------- The script below is the main fluid simulation code. In the case of needing this for future projects, this is where you should be looking. ---------- 
+
+    Alot of this code was inspired by Ten Minute Physics' video on making a FLIP simulator in a browser. You can watch his video here.
+    URL: https://www.youtube.com/watch?v=XmzBREkK8kY
+    Date Accessed: 05/05/2024
+
+"""
 
 
 
@@ -543,6 +549,12 @@ class MFS_Grid():
     '''
 
     def __init__(self, resolution, cell_size):
+        '''__init__ sets up the general arrays and grids used for the fluid simulation
+
+        resolution            : The number of cells in each dimension. Eg: (16, 16, 16)
+        cell_size             : The side lengths of a single cell.
+
+        '''
         self.resolution = resolution
         self.cell_size = cell_size
 
@@ -561,7 +573,13 @@ class MFS_Grid():
 
         self.particleHashTable = {}
 
-    def particles_to_grid(self, particles, bbox):        
+    def particles_to_grid(self, particles, bbox):
+        '''particles_to_grid trilinearly interpolates the particle velocities onto the velocity grids.
+
+        particles       : An array containing fluid particles
+        bbox            : The bounding box domain
+
+        '''        
         weight_u = np.zeros((self.resolution[0]+1, self.resolution[1], self.resolution[2]), dtype="float64")
 
         weight_v = np.zeros((self.resolution[0], self.resolution[1]+1, self.resolution[2]), dtype="float64")
@@ -734,7 +752,14 @@ class MFS_Grid():
         return average_density
 
     
+    
     def in_bounds(self, i, j, k, li, lj, lk):
+        '''in_bounds checks if the i, j, k index is within the specified bounds
+        
+        i, j, k         : The cell space coordinate
+        li, lj, lk      : The maximum bounds for the grid.
+
+        '''
         return (
             0 <= i < li and
             0 <= j < lj and 
@@ -743,6 +768,14 @@ class MFS_Grid():
                 
         
     def get_trilinear_weights(self, x, y, z, i, j, k, array):
+        '''get_trilinear_weights uses the particle position (in grid/cell space), to calculated the weights for the surrounding cells.
+
+        x, y, z     : The particle position in grid coords.
+        i, j, k     : The particle position in cell coords.
+        array       : The 3-Dimensional array to check the weight indexes.
+
+
+        '''
         dx = x - i
         dy = y - j
         dz = z - k
@@ -759,6 +792,13 @@ class MFS_Grid():
         return w000, w100, w010, w110, w001, w011, w101, w111
 
     def calc_dt(self, particles, timescale, external_force):
+        '''calc_dt finds a timestep suitable enough so that particles will only move 1 cell space at a time.
+
+        particles           : The array of fluid particles
+        timescale           : The speed of the simulation
+        external_force      : External force acting on the simulation. eg: (0, -9.8, 0)
+
+        '''
         max_speed = 0
 
         for particle in particles:
@@ -773,6 +813,12 @@ class MFS_Grid():
         return min(timescale, max(timescale * max_dist / max_speed, 1))
 
     def apply_forces(self, external_force, dt):
+        '''apply_forces adds the external forces to the velocity grids
+
+        external-force      : External force acting on the simulation. eg: (0, -9.8, 0)
+        dt                  : The simulation cfl timestep
+
+        '''
         for u in range(self.resolution[0] + 1):
             for v in range(self.resolution[1]):
                 for w in range(self.resolution[2]):
@@ -789,6 +835,8 @@ class MFS_Grid():
                     self.velocity_w[u][v][w] += external_force[2] * dt
 
     def enforce_boundaries(self):
+        '''enforce_boundaries makes sure that border cells dont have velocities that point out of the simulation domain.
+        '''
         for uy in range(self.resolution[1] ):
             for uz in range(self.resolution[2] ):
                 if (self.velocity_u[0][uy][uz] < 0): 
@@ -811,6 +859,14 @@ class MFS_Grid():
                     self.velocity_w[wx][wy][self.resolution[2]] = 0
 
     def solve_divergence(self, iterations, overrelaxation, stiffness, rest_density):
+        ''' solve_divergence makes the fluid incompressible.
+
+        iterations          : The number of iterations for the divergence solve
+        overrelaxation      : Scalar value for the velocity difference
+        stiffness           : Scalar value for the density difference force
+        rest_density        : The average density of the fluid
+        
+        '''
         for n in range(iterations):
             for i in range(self.resolution[0]):
                 for j in range(self.resolution[1]):
@@ -842,6 +898,15 @@ class MFS_Grid():
 
 
     def grid_to_particles(self, particles, bbox, flipFac, dt):
+        '''grid_to_particles trilinearly interpolates the grid velocities onto the particle velocities.
+
+        particles           : An array containing fluid particles
+        bbox                : The bounding box domain
+        flipFac             : The blending from PIC (0) -> (1) FLIP. 
+        dt                  : The simulation cfl timestep
+
+        '''      
+
         for p in particles:
             x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([0, -0.5, -0.5]))
 
@@ -996,6 +1061,13 @@ class MFS_Grid():
             self.insert_particle_into_hash_table(p, bbox, np.zeros(3))
 
     def handle_collisions_and_boundary(self, particles, bbox, pscale):
+        '''handle_collsisions_and_boundary keeps the particles within the simulation domain and handles all particle to particle collisions.
+
+        particles           : An array containing fluid particles
+        bbox                : The bounding box domain
+        pscale              : The size of the particless
+
+        '''
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
 
         for particle in particles:
@@ -1068,6 +1140,14 @@ class MFS_Grid():
             self.insert_particle_into_hash_table(particle, bbox, np.zeros(3))
     
     def get_velocity(self, velu, velv, velw, i, j, k):
+        '''get_velocity obtains the 3D velocity at a certain cell (i, j, k)
+
+        velu            : The u velocity grid
+        velv            : The v velocity grid
+        velw            : The w velocity grid
+        i, j, k         : The cell coordinate
+        
+        '''
         return np.array([
             velu[i + 1][j][k] - velu[i][j][k],
             velv[i][j+1][k] - velv[i][j][k],
@@ -1075,6 +1155,13 @@ class MFS_Grid():
         ]) / self.cell_size
     
     def get_grid_coords(self, bbox, position, offset):
+        '''get_grid_coords gets the grid/cell space coordinates of a particle position.
+
+        bbox                : The bounding box domain
+        position            : The position of the particle
+        offset              : The grid/cell space offset value
+
+        '''
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
         x = ((position[0] - min_x) / self.cell_size[0]) - offset[0]
         y = ((position[1] - min_y) / self.cell_size[1]) - offset[1]
@@ -1086,28 +1173,67 @@ class MFS_Grid():
 
         return x, y, z, i, j, k
     
-    # CHAT GPT START
-    
+
+    # Provided by OpenAI's ChatGPT
+    # Original source: OpenAI ChatGPT model
+    # URL: https://openai.com/chatgpt
+    # Date Accessed: 05/05/2024
+       
+    # Code from ChatGPT starts here
+
+    # Function to insert a particle into the hash table based on its bounding box and offset
     def insert_particle_into_hash_table(self, particle, bbox, offset):
+        ''' Inserts a particle into the hash table based on its bounding box and offset.
+
+        particle: The particle to insert into the hash table.
+        bbox: The bounding box of the particle.
+        offset: The offset to determine the grid coordinates.
+
+        '''
+        # Get grid coordinates of the particle based on its bounding box and offset
         x, y, z, i ,j, k = self.get_grid_coords(bbox, particle.position, offset)
+        # Hash the grid coordinates to get the hash value
         hash_val = self.hash_coords(i, j, k)
 
+        # If hash value not in the hash table, create a new entry
         if hash_val not in self.particleHashTable:
             self.particleHashTable[hash_val] = []
 
+        # Append the particle to the appropriate entry in the hash table
         self.particleHashTable[hash_val].append(particle)
 
+    # Function to retrieve particles from the hash table based on grid coordinates
     def get_particles_from_hash_table(self, i, j, k):
+        ''' Retrieves particles from the hash table based on grid coordinates.
+
+            i: The grid coordinate along the x-axis.
+            j: The grid coordinate along the y-axis.
+            k: The grid coordinate along the z-axis.
+
+        '''
+        # Hash the grid coordinates to get the hash value
         hash_val = self.hash_coords(i, j, k)
+        # Retrieve particles from the hash table based on the hash value, return empty list if not found
         return self.particleHashTable.get(hash_val, [])
-    
+
+    # Function to hash grid coordinates to a single value
     def hash_coords(self, i, j, k):
+        ''' Hashes grid coordinates to a single value for indexing the hash table.
+
+            i: The grid coordinate along the x-axis.
+            j: The grid coordinate along the y-axis.
+            k: The grid coordinate along the z-axis.
+
+        '''
+        # Combine grid coordinates using bitwise XOR and a prime number, then take absolute value and modulo to fit within hash table size
         h = (i * 92837111) ^ (j * 689287499) ^ (k * 123456789)
         return abs(h) % (self.resolution[0] * self.resolution[1] * self.resolution[2])
 
-    # CHATGPT END
+    # Code from ChatGPT ends here
 
     def clear(self):
+        '''clear resets the hash table and the velocity, density grids.
+        '''
         self.particleHashTable = {}
         self.velocity_u = np.zeros((self.resolution[0]+1, self.resolution[1], self.resolution[2]), dtype="float64")
         self.velocity_v = np.zeros((self.resolution[0], self.resolution[1]+1, self.resolution[2]), dtype="float64")
