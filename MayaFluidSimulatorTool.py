@@ -35,7 +35,6 @@ import numpy as np
 class MFS_Plugin():
     
     # "global" variables
-    project_path = cmds.workspace(query=True, rootDirectory=True)
     popup_size = (500, 600)
     button_ratio = 0.9
 
@@ -49,7 +48,7 @@ class MFS_Plugin():
     def MFS_create_menu(self):
         self.MFS_delete_menu()
         cmds.menu("MFS_menu", label="Maya Fluid Simulator", parent="MayaWindow", tearOff=False)
-        cmds.menuItem(label="Open Maya Fluid Simulator", command=lambda x:self.MFS_popup(), image=os.path.join(self.project_path, "icons/MFS_icon_solver_512.png"))
+        cmds.menuItem(label="Open Maya Fluid Simulator", command=lambda x:self.MFS_popup())
     
 
     ''' MFS_popip creates the main UI for Maya Fluid Simulator. 
@@ -77,8 +76,6 @@ class MFS_Plugin():
         
         cmds.window(title="Maya Fluid Simulator", widthHeight=self.popup_size)
         col = cmds.columnLayout(adjustableColumn=True)
-
-        cmds.image(width=self.popup_size[0]/2, height=self.popup_size[1]/4, image=os.path.join(self.project_path, "icons/MFS_banner.png"))
 
         initialize_section = cmds.frameLayout(label='Initialize', collapsable=True, collapse=False, parent=col)
         cmds.columnLayout(adjustableColumn=True, parent=initialize_section)
