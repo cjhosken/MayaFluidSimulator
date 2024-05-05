@@ -64,9 +64,9 @@ class MFS_Plugin():
 
         Force                  : External forces acting on the fluid. Usually gravity.
         Initial Velocity       : The initial velocity of the fluid particles.
-        Fluid Density*         : The density of the fluid
-        Viscosity Factor*      : The amount of viscosity that the fluid has. (Water) -> (Honey)
-        Floor Damping          : The amount of damping when particles collide with the floor
+        Stiffness              : The amount of pressure force
+        Overrelaxation         : The amount of velocity divergence
+        Iterations             : The number of iterations for the divergence solve
         PIC/FLIP Mix           : The blending from PIC (0) -> (1) FLIP. PIC is often better for viscious fluids, while FLIP is good for splashy fluids.
         Frame Range            : The range in the which simulation should run between.
         Time Scale             : The speed of the simulation.
@@ -259,9 +259,11 @@ class MFS_Plugin():
         frame_range             : The range in the which simulation should run between.
         timescale               : The speed of the simulation.
         external_force          : The external forces acting on the fluid. Usually gravity.
-        damping                 : The damping factor for particle-ground collisions.
         pscale                  : The size of the particles.
         flipFac                 : The blending from PIC (0) -> (1) FLIP. 
+        iterations              : The number of iterations for the divergence solve.
+        overrelaxation          : The amount of velocity divergence.
+        stiffness               : The amount of pressure force.
         progress                : Used to track the progress bar.
 
         The reason why so many values are being parsed through the update function is to avoid settings changing midway though simulation.
@@ -509,15 +511,13 @@ class MFS_Particle():
         
 
 
-    def integrate(self, current_velocity, last_velocity, flipFac, bbox, dt):
-        ''' advect takes the interpolated velocity from the grid and adds it to the particle.
+    def integrate(self, current_velocity, last_velocity, flipFac, dt):
+        ''' integrate takes the interpolated velocity from the grid and adds it to the particle.
 
-        bbox            : The bounding box of the simulation domain.
-        velocity        : The current velocity.
+        current_velocity: The current velocity.
         last_velocity   : The velocity from last_velocity.
-        damping         : The damping factor for particle-ground collisions.
-        dt              : The timestep.
         flipFac         : The blending from PIC (0) -> (1) FLIP. 
+        dt              : The timestep.
 
         '''
 
