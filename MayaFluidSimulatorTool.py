@@ -493,7 +493,7 @@ class MFS_Plugin():
     Alot of this code was inspired by Ten Minute Physics' video on making a FLIP simulator in a browser. You can watch his video here.
     URL: https://www.youtube.com/watch?v=XmzBREkK8kY
     Date Accessed: 05/05/2024
-
+    
 """
 
 
