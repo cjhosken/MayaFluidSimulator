@@ -515,7 +515,7 @@ class MFS_Particle():
         # Update velocity based on interpolated grid velocity
         pic = current_velocity
 
-        flip = self.velocity + (last_velocity - current_velocity)
+        flip = self.velocity + (current_velocity - last_velocity)
         self.velocity = flipFac * flip + (1 - flipFac) * pic
 
         self.position += self.velocity * dt
@@ -858,6 +858,30 @@ class MFS_Grid():
             if (total_weight > 0):
                 velocity_u /= total_weight
 
+            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position - p.velocity * dt, np.array([0, -0.5, -0.5]))
+
+            w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_u)
+
+            total_weight = w000 + w100 + w010 + w110 + w001 + w011 + w101 + w111
+
+            i = max(i, 0)
+            j = max(j, 0)
+            k = max(k, 0)
+
+            last_velocity_u = (
+                self.last_velocity_u[min(i, self.resolution[0])][min(j, self.resolution[1] -1)][min(k, self.resolution[2] -1)] * w000 +
+                self.last_velocity_u[min(i + 1, self.resolution[0])][min(j, self.resolution[1] -1)][min(k, self.resolution[2] -1)] * w100 +
+                self.last_velocity_u[min(i, self.resolution[0])][min(j + 1, self.resolution[1] -1)][min(k, self.resolution[2] -1)] * w010 +
+                self.last_velocity_u[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1] -1)][min(k, self.resolution[2] -1)] * w110 +
+                self.last_velocity_u[min(i, self.resolution[0])][min(j, self.resolution[1] -1)][min(k+1, self.resolution[2] -1)] * w001 +
+                self.last_velocity_u[min(i, self.resolution[0])][min(j + 1, self.resolution[1] -1)][min(k+1, self.resolution[2] -1)] * w011 +
+                self.last_velocity_u[min(i + 1, self.resolution[0])][min(j, self.resolution[1] -1)][min(k+1, self.resolution[2] -1)] * w101 +
+                self.last_velocity_u[min(i + 1, self.resolution[0])][min(j + 1, self.resolution[1] -1)][min(k+1, self.resolution[2] -1)] * w111
+            )
+
+            if (total_weight > 0):
+                last_velocity_u /= total_weight
+
 
             x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([-0.5, 0.0, -0.5]))
 
@@ -882,6 +906,30 @@ class MFS_Grid():
 
             if (total_weight > 0):
                 velocity_v /= total_weight
+
+            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position - p.velocity * dt, np.array([-0.5, 0.0, -0.5]))
+
+            w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_v)
+
+            total_weight = w000 + w100 + w010 + w110 + w001 + w011 + w101 + w111
+
+            i = max(i, 0)
+            j = max(j, 0)
+            k = max(k, 0)
+
+            last_velocity_v = (
+                self.last_velocity_v[min(i, self.resolution[0]-1)][min(j, self.resolution[1])][min(k, self.resolution[2]-1)] * w000 +
+                self.last_velocity_v[min(i + 1, self.resolution[0]-1)][min(j, self.resolution[1])][min(k, self.resolution[2]-1)] * w100 +
+                self.last_velocity_v[min(i, self.resolution[0]-1)][min(j + 1, self.resolution[1])][min(k, self.resolution[2]-1)] * w010 +
+                self.last_velocity_v[min(i + 1, self.resolution[0]-1)][min(j + 1, self.resolution[1])][min(k, self.resolution[2]-1)] * w110 +
+                self.last_velocity_v[min(i, self.resolution[0]-1)][min(j, self.resolution[1])][min(k+1, self.resolution[2]-1)] * w001 +
+                self.last_velocity_v[min(i, self.resolution[0]-1)][min(j + 1, self.resolution[1])][min(k+1, self.resolution[2]-1)] * w011 +
+                self.last_velocity_v[min(i + 1, self.resolution[0]-1)][min(j, self.resolution[1])][min(k+1, self.resolution[2]-1)] * w101 +
+                self.last_velocity_v[min(i + 1, self.resolution[0]-1)][min(j + 1, self.resolution[1])][min(k+1, self.resolution[2]-1)] * w111
+            )
+
+            if (total_weight > 0):
+                last_velocity_v /= total_weight
 
 
             x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([-0.5, -0.5, 0.0]))
@@ -908,8 +956,32 @@ class MFS_Grid():
             if (total_weight > 0):
                 velocity_w /= total_weight
 
+            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position - p.velocity * dt, np.array([-0.5, -0.5, 0.0]))
+
+            w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_w)
+
+            total_weight = w000 + w100 + w010 + w110 + w001 + w011 + w101 + w111
+
+            i = max(i, 0)
+            j = max(j, 0)
+            k = max(k, 0)
+
+            last_velocity_w = (
+                self.last_velocity_w[min(i, self.resolution[0]-1)][min(j, self.resolution[1]-1)][min(k, self.resolution[2])] * w000 +
+                self.last_velocity_w[min(i + 1, self.resolution[0]-1)][min(j, self.resolution[1]-1)][min(k, self.resolution[2])] * w100 +
+                self.last_velocity_w[min(i, self.resolution[0]-1)][min(j + 1, self.resolution[1]-1)][min(k, self.resolution[2])] * w010 +
+                self.last_velocity_w[min(i + 1, self.resolution[0]-1)][min(j + 1, self.resolution[1]-1)][min(k, self.resolution[2])] * w110 +
+                self.last_velocity_w[min(i, self.resolution[0]-1)][min(j, self.resolution[1]-1)][min(k+1, self.resolution[2])] * w001 +
+                self.last_velocity_w[min(i, self.resolution[0]-1)][min(j + 1, self.resolution[1]-1)][min(k+1, self.resolution[2])] * w011 +
+                self.last_velocity_w[min(i + 1, self.resolution[0]-1)][min(j, self.resolution[1]-1)][min(k+1, self.resolution[2])] * w101 +
+                self.last_velocity_w[min(i + 1, self.resolution[0]-1)][min(j + 1, self.resolution[1]-1)][min(k+1, self.resolution[2])] * w111
+            )
+
+            if (total_weight > 0):
+                last_velocity_w /= total_weight
+
             current_velocity = np.array([velocity_u, velocity_v, velocity_w])
-            last_velocity = np.zeros(3)
+            last_velocity = np.array([last_velocity_u, last_velocity_v, last_velocity_w])
 
             p.integrate(current_velocity, last_velocity, flipFac, bbox, dt)
             self.insert_particle_into_hash_table(p, bbox, np.zeros(3))
