@@ -35,7 +35,7 @@ import numpy as np
 class MFS_Plugin():
     
     # "global" variables
-    popup_size = (500, 600)
+    popup_size = (500, 450)
     button_ratio = 0.9
 
 
