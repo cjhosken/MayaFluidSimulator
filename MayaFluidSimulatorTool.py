@@ -80,7 +80,7 @@ class MFS_Plugin():
 
         initialize_section = cmds.frameLayout(label='Initialize', collapsable=True, collapse=False, parent=col)
         cmds.columnLayout(adjustableColumn=True, parent=initialize_section)
-        self.pscale_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.25, field=True, label="Particle scale")
+        self.pscale_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.1, field=True, label="Particle Scale")
         self.cell_size_ctrl = cmds.floatSliderGrp(minValue=0, step=0.01, value=0.25, field=True, label="Cell Size")
         self.random_sample_ctrl = cmds.intSliderGrp(minValue=0, value=0, field=True, label="Random Sampling")
 
@@ -97,11 +97,11 @@ class MFS_Plugin():
         self.force_ctrl = cmds.floatFieldGrp(numberOfFields=3, label='Force', extraLabel='cm', value1=0, value2=-9.8, value3=0 )
         self.vel_ctrl = cmds.floatFieldGrp( numberOfFields=3, label='Initial Velocity', extraLabel='cm', value1=0, value2=0, value3=0 )
 
-        self.stiff_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.1, field=True, label="Stiffness")
-        self.relax_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.5, field=True, label="Overrelaxation")
+        self.stiff_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.05, field=True, label="Pressure")
+        self.relax_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.019, field=True, label="Overrelaxation")
         self.iter_ctrl = cmds.intSliderGrp(minValue=0, value=5, field=True, label="Iterations")
 
-        self.picflip_ctrl = cmds.floatSliderGrp(minValue=0, maxValue=1.0, step=0.01, value=0.6, field=True, label="PIC/FLIP Mix")
+        self.picflip_ctrl = cmds.floatSliderGrp(minValue=0, maxValue=1.0, step=0.01, value=0.0, field=True, label="PIC/FLIP Mix")
         
         cmds.rowLayout(numberOfColumns=2)
         self.time_ctrl = cmds.intFieldGrp(numberOfFields=2, value1=0, value2=120, label="Frame Range")
@@ -693,7 +693,7 @@ class MFS_Grid():
             weight_w[min(i+1, self.resolution[0] - 1)][min(j+1, self.resolution[1] - 1)][min(k+1, self.resolution[2])] += w111
 
             # calculate particle pressure in each cell
-            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([-0.5, -0.5, -0.5]))
+            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([0, 0, 0]))
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.pressure)
 
             i = max(i, 0)
@@ -716,7 +716,7 @@ class MFS_Grid():
             j = max(j, 0)
             k = max(k, 0)
 
-            self.type[min(i, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k, self.resolution[2]-1)] == 1
+            self.type[min(i, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k, self.resolution[2]-1)] = 1
 
         # Average all the weights
 
@@ -874,24 +874,24 @@ class MFS_Grid():
         iterations          : The number of iterations for the divergence solve
         overrelaxation      : Scalar value for the velocity difference
         stiffness           : Scalar value for the pressure difference force
-        rest_pressure        : The average pressure of the fluid
+        average_pressure        : The average pressure of the fluid
         
         '''
-        # Iterate over the number of interations specified
+
+        # Iterate over the number of interations specified.
+        # Iterations is set to 1 here as it gives realistic results very quickly
         for n in range(iterations):
             divergence = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
+
             for i in range(self.resolution[0]):
                 for j in range(self.resolution[1]):
                     for k in range(self.resolution[2]):
                         # Calculate the divergence.
-                        # Overrelaxation and Stiffness are divided by 10 to make the UI settings more usable. 
-                        # This is likely due to the fact that the scene scale is VERY small.
-                        
-                        divergence[i][j][k] = overrelaxation/10 * (
+                        divergence[i][j][k] = overrelaxation * (
                             (self.velocity_u[i+1][j][k] - self.velocity_u[i][j][k]) / (self.cell_size[0]) +
                             (self.velocity_v[i][j+1][k] - self.velocity_v[i][j][k]) / (self.cell_size[1]) +
                             (self.velocity_w[i][j][k+1] - self.velocity_w[i][j][k]) / (self.cell_size[2])
-                        ) - stiffness/10 * (self.pressure[i][j][k] - average_pressure)
+                        ) - stiffness * (self.pressure[i][j][k] - average_pressure)
 
                         
             for i in range(self.resolution[0]):
@@ -1149,7 +1149,7 @@ class MFS_Grid():
                     dist_squared = dx ** 2 + dy ** 2 + dz ** 2
                     min_dist_squared = (pscale) ** 2
 
-                    if dist_squared < min_dist_squared:
+                    if dist_squared <= min_dist_squared:
                         # Swap velocities
                         temp_velocity = particle.velocity
                         particle.velocity = other.velocity
@@ -1267,7 +1267,7 @@ class MFS_Grid():
         '''
         # Combine grid coordinates using bitwise XOR and a prime number, then take absolute value and modulo to fit within hash table size
         h = (i * 92837111) ^ (j * 689287499) ^ (k * 123456789)
-        return abs(h) % ((self.resolution[0] * self.resolution[1] * self.resolution[2])/8)
+        return abs(h) % ((self.resolution[0]/2 * self.resolution[1]/2 * self.resolution[2]/2))
 
     # Code from ChatGPT ends here
 
