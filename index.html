@@ -63,7 +63,7 @@
         class Particle {
             constructor(x, y, radius) {
                 this.position = [x, y];
-                this.velocity = [100.0, 0.0];
+                this.velocity = [-50.0, 500.0];
                 this.radius = radius;
             }
             draw(ctx) {
@@ -462,7 +462,7 @@
                 // Advect particles
                 particles.forEach(particle => {
 
-                    integrated_position = [particle.position[0] + particle.velocity[0] * dt, particle.position[1] + particle.velocity[1] * dt]
+                    integrated_position = [particle.position[0] + particle.velocity[0] * dt, particle.position[1]+ particle.velocity[1] * dt]
 
                     x = integrated_position[0] / CELL_SIZE[0]
                     y = integrated_position[1] / CELL_SIZE[1] - 0.5
@@ -482,10 +482,10 @@
                     j = Math.max(0, j)
 
 
-                    w00 = (1 - dx) * (1 - dy) * (b00 || type[Math.min(i, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
-                    w10 = (dx) * (1 - dy) * (b10 || type[Math.min(i + 1, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
-                    w01 = (1 - dx) * (dy) * (b01 || type[Math.min(i, type.length - 1)][Math.min(j + 1, type[0].length - 1)] == 1)
-                    w11 = (dx) * (dy) * (b11 || type[Math.min(i + 1, type.length - 1)][Math.min(j + 1, type[0].length - 1)] == 1)
+                    w00 = (1 - dx) * (1 - dy) * (b00 && type[Math.min(i, type.length - 1)][Math.min(j, type[0].length - 1)] != 2)
+                    w10 = (dx) * (1 - dy) * (b10 && type[Math.min(i + 1, type.length - 1)][Math.min(j, type[0].length - 1)] != 2)
+                    w01 = (1 - dx) * (dy) * (b01 && type[Math.min(i, type.length - 1)][Math.min(j + 1, type[0].length - 1)] != 2)
+                    w11 = (dx) * (dy) * (b11 && type[Math.min(i + 1, type.length - 1)][Math.min(j + 1, type[0].length - 1)] != 2)
 
                     total_weight = w00 + w10 + w01 + w11
 
@@ -515,10 +515,10 @@
                     i = Math.max(0, i)
                     j = Math.max(0, j)
 
-                    w00 = (1 - dx) * (1 - dy) * (b00 || type[Math.min(i, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
-                    w10 = (dx) * (1 - dy) * (b10 || type[Math.min(i + 1, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
-                    w01 = (1 - dx) * (dy) * (b01 || type[Math.min(i, type.length - 1)][Math.min(j + 1, type[0].length - 1)] == 1)
-                    w11 = (dx) * (dy) * (b11 || type[Math.min(i + 1, type.length - 1)][Math.min(j + 1, type[0].length - 1)] == 1)
+                    w00 = (1 - dx) * (1 - dy) * (b00 && type[Math.min(i, type.length - 1)][Math.min(j, type[0].length - 1)] != 2)
+                    w10 = (dx) * (1 - dy) * (b10 && type[Math.min(i + 1, type.length - 1)][Math.min(j, type[0].length - 1)] != 2)
+                    w01 = (1 - dx) * (dy) * (b01 && type[Math.min(i, type.length - 1)][Math.min(j + 1, type[0].length - 1)] != 2)
+                    w11 = (dx) * (dy) * (b11 && type[Math.min(i + 1, type.length - 1)][Math.min(j + 1, type[0].length - 1)] != 2)
 
                     total_weight = w00 + w10 + w01 + w11
 
@@ -550,10 +550,10 @@
                     j = Math.max(0, j)
 
 
-                    w00 = (1 - dx) * (1 - dy) * (b00 || type[Math.min(i, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
-                    w10 = (dx) * (1 - dy) * (b10 || type[Math.min(i + 1, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
-                    w01 = (1 - dx) * (dy) * (b01 || type[Math.min(i, type.length - 1)][Math.min(j + 1, type[0].length - 1)] == 1)
-                    w11 = (dx) * (dy) * (b11 || type[Math.min(i + 1, type.length - 1)][Math.min(j + 1, type[0].length - 1)] == 1)
+                    w00 = (1 - dx) * (1 - dy) * (b00 && type[Math.min(i, type.length - 1)][Math.min(j, type[0].length - 1)] != 2)
+                    w10 = (dx) * (1 - dy) * (b10 && type[Math.min(i + 1, type.length - 1)][Math.min(j, type[0].length - 1)] != 2)
+                    w01 = (1 - dx) * (dy) * (b01 && type[Math.min(i, type.length - 1)][Math.min(j + 1, type[0].length - 1)] != 2)
+                    w11 = (dx) * (dy) * (b11 && type[Math.min(i + 1, type.length - 1)][Math.min(j + 1, type[0].length - 1)] != 2)
 
                     total_weight = w00 + w10 + w01 + w11
 
@@ -583,10 +583,10 @@
                     i = Math.max(0, i)
                     j = Math.max(0, j)
 
-                    w00 = (1 - dx) * (1 - dy) * (b00 || type[Math.min(i, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
-                    w10 = (dx) * (1 - dy) * (b10 || type[Math.min(i + 1, type.length - 1)][Math.min(j, type[0].length - 1)] == 1)
-                    w01 = (1 - dx) * (dy) * (b01 || type[Math.min(i, type.length - 1)][Math.min(j + 1, type[0].length - 1)] == 1)
-                    w11 = (dx) * (dy) * (b11 || type[Math.min(i + 1, type.length - 1)][Math.min(j + 1, type[0].length - 1)] == 1)
+                    w00 = (1 - dx) * (1 - dy) * (b00 && type[Math.min(i, type.length - 1)][Math.min(j, type[0].length - 1)] != 2)
+                    w10 = (dx) * (1 - dy) * (b10 && type[Math.min(i + 1, type.length - 1)][Math.min(j, type[0].length - 1)] != 2)
+                    w01 = (1 - dx) * (dy) * (b01 && type[Math.min(i, type.length - 1)][Math.min(j + 1, type[0].length - 1)] != 2)
+                    w11 = (dx) * (dy) * (b11 && type[Math.min(i + 1, type.length - 1)][Math.min(j + 1, type[0].length - 1)] != 2)
 
                     total_weight = w00 + w10 + w01 + w11
 
@@ -599,9 +599,7 @@
 
                     if (total_weight > 0) last_vel_v /= total_weight
 
-
-
-                    flipFac = 0.9
+                    flipFac = 0.6
 
                     particle.velocity[0] = (vel_u) * (1 - flipFac) + (particle.velocity[0] + vel_u - last_vel_u) * flipFac
                     particle.velocity[1] = (vel_v) * (1 - flipFac) + (particle.velocity[1] + vel_v - last_vel_v) * flipFac
