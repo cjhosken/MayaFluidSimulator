@@ -409,10 +409,10 @@
                 for (let i = 0; i < CELL_COUNT; i++) {
                     divergence[i] = [];
                     for (let j = 0; j < CELL_COUNT; j++) {
-                        divergence[i][j] = 1.9 * (
+                        divergence[i][j] = 0.1 * (
                             (velocity_u[i + 1][j] - velocity_u[i][j]) / (1 * CELL_SIZE[0]) +
                             (velocity_v[i][j + 1] - velocity_v[i][j]) / (1 * CELL_SIZE[1])
-                        ) - 2 * (pressure[i][j] - average)
+                        ) - 3 * (pressure[i][j] - average)
                     }
                 }
                 return divergence;
@@ -599,7 +599,7 @@
 
                     if (total_weight > 0) last_vel_v /= total_weight
 
-                    flipFac = 1
+                    flipFac = 0.7
 
                     particle.velocity[0] = (vel_u) * (1 - flipFac) + (particle.velocity[0] + vel_u - last_vel_u) * flipFac
                     particle.velocity[1] = (vel_v) * (1 - flipFac) + (particle.velocity[1] + vel_v - last_vel_v) * flipFac

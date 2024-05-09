@@ -189,7 +189,24 @@ class MFS_Plugin():
 
 
     def MFS_simulate(self):
-        ''' MFS_simulate begins the Maya Fluid Simulation from the given fluid settings. '''
+        ''' simulate is the start of an actual Fluid Simulator. It simulates the particle position frame by frame, keyframing the positions each time. 
+            The user is then able to cancel the simulation by pressing Esc, however they need to wait for the current frame to finish simulation.
+        
+            source                  : The fluid source object
+            particles               : The array containing the MFS_Particles
+            grid                    : The MFS_Grid which most of the calculations are done on.
+            frame_range             : The range in the which simulation should run between.
+            timescale               : The speed of the simulation.
+            external_force          : The external forces acting on the fluid. Usually gravity.
+            pscale                  : The size of the particles.
+            flipFac                 : The blending from PIC (0) -> (1) FLIP. 
+            iterations              : The number of iterations for the divergence solve.
+            overrelaxation          : The amount of velocity divergence.
+            stiffness               : The amount of pressure force.
+            progress                : Used to track the progress bar.
+
+            The reason why so many values are being parsed through the update function is to avoid settings changing midway though simulation.
+        '''
 
         source = self.get_active_object()
 
@@ -244,83 +261,67 @@ class MFS_Plugin():
 
             cmds.progressWindow(title='Simulating', progress=0, status='Progress: 0%', isInterruptable=True, maxValue=(frame_range[1]-frame_range[0]))
             
-            # The simulation is then properly started in update.
-            self.update(source, particles, grid, frame_range, timescale, external_force, pscale, flipFac, iterations, overrelaxation, stiffness, 0)
+            progress = 0
+            cmds.currentTime(frame_range[0], edit=True)
+            t = frame_range[0]
+            solved = False
+            cancelled = False
 
+            # This is the start of the simulator. The method is a python implementation of:
+            #
+            # 1. keyframe frame: copy the particle positions in the simulation onto the maya particle objects.
+            # 2. enter the CFL domain. This is done to limit particles travelling only 1 cell at a time.
+            # 3. particles_to_grid: transfer the point velocities to the grid using trilinear interpolation.
+            # 4. calc_dt: find the timestep. This will differ from cfl iteration to iteration, but at maximum is the timescale.
+            # 5. apply_forces: calculate external forces such as gravity.
+            # 6. enforce_boundaries: stop any edge cell velocities from pointing out of the domain. This is done by setting the velocity component to 0.
+            # 7. solve_divergence: solve the possion equation that makes the fluid divergence free.
+            # 8. grid_to_particles: transfer the grid velocities back into the particles, then move the particles.
+            # 9. handle_collisions_and_boundary: Check for particle collisions and move any escaping particles back into the simulation domain.
+            #
+            # Once the cfl iterations are complete, the next frame is done until all the frames within the frame range are simulated.
 
-    
-    def update(self, source, particles, grid, frame_range, timescale, external_force, pscale, flipFac, iterations, overrelaxation, stiffness, progress):
-        ''' update is the start of an actual Fluid Simulator. It simulates the particle position frame by frame, keyframing the positions each time. 
-        The user is then able to cancel the simulation by pressing Esc, however they need to wait for the current frame to finish simulation.
-    
-        source                  : The fluid source object
-        particles               : The array containing the MFS_Particles
-        grid                    : The MFS_Grid which most of the calculations are done on.
-        frame_range             : The range in the which simulation should run between.
-        timescale               : The speed of the simulation.
-        external_force          : The external forces acting on the fluid. Usually gravity.
-        pscale                  : The size of the particles.
-        flipFac                 : The blending from PIC (0) -> (1) FLIP. 
-        iterations              : The number of iterations for the divergence solve.
-        overrelaxation          : The amount of velocity divergence.
-        stiffness               : The amount of pressure force.
-        progress                : Used to track the progress bar.
-
-        The reason why so many values are being parsed through the update function is to avoid settings changing midway though simulation.
-        '''
-        
-        percent = (progress / (frame_range[1] - frame_range[0])) * 100
-
-        cmds.progressWindow(e=1, progress=progress, status=f'Progress: {percent:.1f}%')
-        t = int(cmds.currentTime(query=True))
-        solved = (t < frame_range[0] or t > frame_range[1])
-        cancelled = cmds.progressWindow(query=True, isCancelled=True)
-
-        # Get the domain bounding box
-        bbox = cmds.exactWorldBoundingBox(source + "_domain")
-
-        # This is the start of the simulator. The method is a python implementation of:
-        #
-        # 1. keyframe frame: copy the particle positions in the simulation onto the maya particle objects.
-        # 2. enter the CFL domain. This is done to limit particles travelling only 1 cell at a time.
-        # 3. particles_to_grid: transfer the point velocities to the grid using trilinear interpolation.
-        # 4. calc_dt: find the timestep. This will differ from cfl iteration to iteration, but at maximum is the timescale.
-        # 5. apply_forces: calculate external forces such as gravity.
-        # 6. enforce_boundaries: stop any edge cell velocities from pointing out of the domain. This is done by setting the velocity component to 0.
-        # 7. solve_divergence: solve the possion equation that makes the fluid divergence free.
-        # 8. grid_to_particles: transfer the grid velocities back into the particles, then move the particles.
-        # 9. handle_collisions_and_boundary: Check for particle collisions and move any escaping particles back into the simulation domain.
-        #
-        # Once the cfl iterations are complete, the next frame is done until all the frames within the frame range are simulated.
-
-    
-        if (not (solved or cancelled)):
-            self.keyframe(source, particles, t)
+            # Initialize an average pressure variable to be used throughout the whole simulation
             
-            print(f"Maya Fluid Simulator | Simulating Frame: {t}")
-
-            cfl = 0
             average_pressure = -1
 
-            while(cfl < timescale):
-                grid.clear()
-                pressure = grid.particles_to_grid(particles, bbox)
-                if (average_pressure < 0):
-                    average_pressure = pressure
-                dt = grid.calc_dt(particles, timescale, external_force)
-                grid.apply_forces(external_force, dt)
-                grid.enforce_boundaries()
-                grid.solve_divergence(iterations, overrelaxation, stiffness, average_pressure)
-                grid.grid_to_particles(particles, bbox, flipFac, dt)
-                grid.handle_collisions_and_boundary(particles, bbox, pscale)
-                cfl += dt            
+            while (not (solved or cancelled)):
+                percent = (progress / (frame_range[1] - frame_range[0])) * 100
 
-            cmds.currentTime(t + 1, edit=True)
+                cmds.progressWindow(e=1, progress=progress, status=f'Progress: {percent:.1f}%')
+                solved = (t < frame_range[0] or t > frame_range[1])
+                cancelled = cmds.progressWindow(query=True, isCancelled=True)
 
-            self.update(source, particles, grid, frame_range, timescale, external_force, pscale, flipFac, iterations, overrelaxation, stiffness, progress=progress+1)
-        else:
-            cmds.currentTime(frame_range[0], edit=True)
-            cmds.progressWindow(endProgress=1)
+                self.keyframe(source, particles, t)
+                
+                print(f"Maya Fluid Simulator | Simulating Frame: {t}")
+
+                # Initialize the CFL counter to maintain single cell stepping
+                cfl = 0
+
+                while(cfl < timescale):
+                    grid.clear()
+
+                    grid.particles_to_grid(particles, bbox)
+
+                    if (average_pressure < 0):
+                        average_pressure = grid.average_pressure()
+
+                    dt = grid.calc_dt(particles, timescale, external_force)
+                    grid.apply_forces(external_force, dt)
+                    grid.enforce_boundaries()
+                    grid.solve_divergence(iterations, overrelaxation, stiffness, average_pressure)
+                    grid.grid_to_particles(particles, bbox, flipFac, dt)
+                    grid.handle_collisions_and_boundary(particles, bbox, pscale)
+                    cfl += dt            
+
+                t += 1
+                cmds.currentTime(t, edit=True)
+                progress += 1
+
+            else:
+                cmds.currentTime(frame_range[0], edit=True)
+                cmds.progressWindow(endProgress=1)
 
 
     def keyframe(self, source, particles, t):
@@ -591,7 +592,7 @@ class MFS_Grid():
 
         for p in particles:
 
-            # SOLVE U VELOCITY
+            # Trilinear interpolate particle u velocity to the grid (x velocity)
             x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([0.0, -0.5, -0.5]))
         
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_u)
@@ -624,7 +625,7 @@ class MFS_Grid():
             self.velocity_u[min(i+1, self.resolution[0] - 1)][min(j+1, self.resolution[1]  - 1)][min(k+1, self.resolution[2]  - 1)] += p.velocity[0] * w111
             weight_u[min(i+1, self.resolution[0])][min(j+1, self.resolution[1]  - 1)][min(k+1, self.resolution[2]  - 1)] += w111
 
-            # SOLVE V VELOCITY
+            # Trilinear interpolate particle v velocity to the grid (y velocity)
             x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([-0.5, 0, -0.5]))
         
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_v)
@@ -658,7 +659,7 @@ class MFS_Grid():
             weight_v[min(i+1, self.resolution[0] - 1)][min(j+1, self.resolution[1])][min(k+1, self.resolution[2] - 1)] += w111
 
 
-            # SOLVE W VELOCITY
+            # Trilinear interpolate particle w velocity to the grid (z velocity)
             x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([-0.5, -0.5, 0]))
         
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_w)
@@ -691,8 +692,8 @@ class MFS_Grid():
             self.velocity_w[min(i+1, self.resolution[0] - 1)][min(j+1, self.resolution[1] - 1)][min(k+1, self.resolution[2])] += p.velocity[2] * w111
             weight_w[min(i+1, self.resolution[0] - 1)][min(j+1, self.resolution[1] - 1)][min(k+1, self.resolution[2])] += w111
 
-            # SOLVE pressure
-            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([0.5, 0.5, 0.5]))
+            # calculate particle pressure in each cell
+            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([-0.5, -0.5, -0.5]))
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.pressure)
 
             i = max(i, 0)
@@ -708,6 +709,7 @@ class MFS_Grid():
             self.pressure[min(i + 1, self.resolution[0]  - 1)][min(j, self.resolution[1]  - 1)][min(k + 1, self.resolution[2]  - 1)] += w101
             self.pressure[min(i + 1, self.resolution[0]  - 1)][min(j + 1, self.resolution[1]  - 1)][min(k + 1, self.resolution[2]  - 1)] += w111
             
+            # Set the cell containing the particle to "fluid"
             x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([0, 0, 0]))
 
             i = max(i, 0)
@@ -715,6 +717,8 @@ class MFS_Grid():
             k = max(k, 0)
 
             self.type[min(i, self.resolution[0] - 1)][min(j, self.resolution[1] - 1)][min(k, self.resolution[2]-1)] == 1
+
+        # Average all the weights
 
         for u in range(self.resolution[0]):
             for v in range(self.resolution[1]):
@@ -733,7 +737,13 @@ class MFS_Grid():
                 for w in range(self.resolution[2]):
                     if (weight_w[u][v][w] > 0):
                         self.velocity_w[u][v][w] /= weight_w[u][v][w]
-        
+
+        self.last_velocity_u = np.array(self.velocity_u, copy=True)
+        self.last_velocity_v = np.array(self.velocity_v, copy=True)
+        self.last_velocity_w = np.array(self.velocity_w, copy=True)
+
+    def average_pressure(self):
+        # Find the average pressure for the start of simulation
         num_fluid_cells = 0
         average_pressure = 0
 
@@ -744,15 +754,11 @@ class MFS_Grid():
                         num_fluid_cells += 1
                         average_pressure += self.pressure[i][j][k]
 
+        # Handle dividing by 0
         if (num_fluid_cells > 0): 
             average_pressure /= num_fluid_cells
-
-        self.last_velocity_u = np.array(self.velocity_u, copy=True)
-        self.last_velocity_v = np.array(self.velocity_v, copy=True)
-        self.last_velocity_w = np.array(self.velocity_w, copy=True)
-
+        
         return average_pressure
-
     
     
     def in_bounds(self, i, j, k, li, lj, lk):
@@ -809,6 +815,7 @@ class MFS_Grid():
 
         max_dist = np.linalg.norm(self.cell_size) * np.linalg.norm(external_force)
 
+        # Handle diving by 0 or negative numbers
         if (max_speed <= 0):
             max_speed = 1
 
@@ -839,6 +846,7 @@ class MFS_Grid():
     def enforce_boundaries(self):
         '''enforce_boundaries makes sure that border cells dont have velocities that point out of the simulation domain.
         '''
+        # Check the bordering cells and if their velocity points outwards, set it to 0.
         for uy in range(self.resolution[1] ):
             for uz in range(self.resolution[2] ):
                 if (self.velocity_u[0][uy][uz] < 0): 
@@ -860,7 +868,7 @@ class MFS_Grid():
                 if (self.velocity_w[wx][wy][self.resolution[2]] > 0):
                     self.velocity_w[wx][wy][self.resolution[2]] = 0
 
-    def solve_divergence(self, iterations, overrelaxation, stiffness, rest_pressure):
+    def solve_divergence(self, iterations, overrelaxation, stiffness, average_pressure):
         ''' solve_divergence makes the fluid incompressible.
 
         iterations          : The number of iterations for the divergence solve
@@ -869,16 +877,27 @@ class MFS_Grid():
         rest_pressure        : The average pressure of the fluid
         
         '''
+        # Iterate over the number of interations specified
         for n in range(iterations):
+            divergence = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
             for i in range(self.resolution[0]):
                 for j in range(self.resolution[1]):
                     for k in range(self.resolution[2]):
-                        divergence = overrelaxation/10 * (
+                        # Calculate the divergence.
+                        # Overrelaxation and Stiffness are divided by 10 to make the UI settings more usable. 
+                        # This is likely due to the fact that the scene scale is VERY small.
+                        
+                        divergence[i][j][k] = overrelaxation/10 * (
                             (self.velocity_u[i+1][j][k] - self.velocity_u[i][j][k]) / (self.cell_size[0]) +
                             (self.velocity_v[i][j+1][k] - self.velocity_v[i][j][k]) / (self.cell_size[1]) +
                             (self.velocity_w[i][j][k+1] - self.velocity_w[i][j][k]) / (self.cell_size[2])
-                        ) - stiffness/10 * (self.pressure[i][j][k] - rest_pressure)
+                        ) - stiffness/10 * (self.pressure[i][j][k] - average_pressure)
 
+                        
+            for i in range(self.resolution[0]):
+                for j in range(self.resolution[1]):
+                    for k in range(self.resolution[2]):
+                        # Find the number of bordering cells
                         borders = (
                             self.in_bounds(i-1, j, k, self.resolution[0], self.resolution[1], self.resolution[2]) + 
                             self.in_bounds(i+1, j, k, self.resolution[0], self.resolution[1], self.resolution[2]) +
@@ -887,15 +906,16 @@ class MFS_Grid():
                             self.in_bounds(i, j, k-1, self.resolution[0], self.resolution[1], self.resolution[2]) +
                             self.in_bounds(i, j, k+1, self.resolution[0], self.resolution[1], self.resolution[2])
                         )
-            
-                        self.velocity_u[i][j][k] += divergence * self.in_bounds(i-1, j, k, self.resolution[0], self.resolution[1], self.resolution[2])/borders
-                        self.velocity_u[i+1][j][k] -= divergence * self.in_bounds(i+1, j, k, self.resolution[0], self.resolution[1], self.resolution[2])/borders
 
-                        self.velocity_v[i][j][k] += divergence * self.in_bounds(i, j-1, k, self.resolution[0], self.resolution[1], self.resolution[2])/borders
-                        self.velocity_v[i][j+1][k] -= divergence * self.in_bounds(i, j+1, k, self.resolution[0], self.resolution[1], self.resolution[2])/borders
+                        # Average out the velocities so that the fluid is divergence free.
+                        self.velocity_u[i][j][k] += divergence[i][j][k] * self.in_bounds(i-1, j, k, self.resolution[0], self.resolution[1], self.resolution[2])/borders
+                        self.velocity_u[i+1][j][k] -= divergence[i][j][k] * self.in_bounds(i+1, j, k, self.resolution[0], self.resolution[1], self.resolution[2])/borders
 
-                        self.velocity_w[i][j][k] += divergence * self.in_bounds(i, j, k-1, self.resolution[0], self.resolution[1], self.resolution[2])/borders
-                        self.velocity_w[i][j][k+1] -= divergence * self.in_bounds(i, j, k+1, self.resolution[0], self.resolution[1], self.resolution[2])/borders
+                        self.velocity_v[i][j][k] += divergence[i][j][k] * self.in_bounds(i, j-1, k, self.resolution[0], self.resolution[1], self.resolution[2])/borders
+                        self.velocity_v[i][j+1][k] -= divergence[i][j][k] * self.in_bounds(i, j+1, k, self.resolution[0], self.resolution[1], self.resolution[2])/borders
+
+                        self.velocity_w[i][j][k] += divergence[i][j][k] * self.in_bounds(i, j, k-1, self.resolution[0], self.resolution[1], self.resolution[2])/borders
+                        self.velocity_w[i][j][k+1] -= divergence[i][j][k] * self.in_bounds(i, j, k+1, self.resolution[0], self.resolution[1], self.resolution[2])/borders
         
 
 
@@ -910,8 +930,10 @@ class MFS_Grid():
         '''      
 
         for p in particles:
-
+            # Find the advected position
             advected = p.position - p.velocity * dt
+
+            # Tri-linearly interpolate the grid u velocity (x velocity) to the particle
 
             x, y, z, i, j, k = self.get_grid_coords(bbox, advected, np.array([0, -0.5, -0.5]))
 
@@ -937,6 +959,8 @@ class MFS_Grid():
             if (total_weight > 0):
                 velocity_u /= total_weight
 
+            # Tri-linearly interpolate the pre-calculated grid u velocity (x velocity) to the particle
+
             x, y, z, i, j, k = self.get_grid_coords(bbox, advected, np.array([0, -0.5, -0.5]))
 
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_u)
@@ -946,6 +970,7 @@ class MFS_Grid():
             i = max(i, 0)
             j = max(j, 0)
             k = max(k, 0)
+
 
             last_velocity_u = (
                 self.last_velocity_u[min(i, self.resolution[0])][min(j, self.resolution[1] -1)][min(k, self.resolution[2] -1)] * w000 +
@@ -961,6 +986,7 @@ class MFS_Grid():
             if (total_weight > 0):
                 last_velocity_u /= total_weight
 
+            # Tri-linearly interpolate the grid v velocity (y velocity) to the particle
 
             x, y, z, i, j, k = self.get_grid_coords(bbox, advected, np.array([-0.5, 0.0, -0.5]))
 
@@ -985,6 +1011,9 @@ class MFS_Grid():
 
             if (total_weight > 0):
                 velocity_v /= total_weight
+
+
+            # Tri-linearly interpolate the pre-calculated grid v velocity (y velocity) to the particle
 
             x, y, z, i, j, k = self.get_grid_coords(bbox, advected, np.array([-0.5, 0.0, -0.5]))
 
@@ -1011,6 +1040,8 @@ class MFS_Grid():
                 last_velocity_v /= total_weight
 
 
+            # Tri-linearly interpolate the grid w velocity (z velocity) to the particle
+
             x, y, z, i, j, k = self.get_grid_coords(bbox, advected, np.array([-0.5, -0.5, 0.0]))
 
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_w)
@@ -1035,6 +1066,8 @@ class MFS_Grid():
             if (total_weight > 0):
                 velocity_w /= total_weight
 
+            # Tri-linearly interpolate the pre-calculated grid w velocity (z velocity) to the particle
+
             x, y, z, i, j, k = self.get_grid_coords(bbox, advected, np.array([-0.5, -0.5, 0.0]))
 
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_w)
@@ -1058,6 +1091,8 @@ class MFS_Grid():
 
             if (total_weight > 0):
                 last_velocity_w /= total_weight
+
+            # get the 'current' and 'last' velocities, then intergrate the particle and put it into the hash table for collisions
 
             current_velocity = np.array([velocity_u, velocity_v, velocity_w])
             last_velocity = np.array([last_velocity_u, last_velocity_v, last_velocity_w])
