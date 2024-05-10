@@ -10,7 +10,6 @@
 # Imports
 from maya import cmds
 from maya.api import OpenMaya as om
-import os
 import random
 import re
 import time
@@ -31,6 +30,7 @@ import time
 '''
 
 import numpy as np
+
 
 class MFS_Plugin():
     ''' The MFS Plugin is a general class that contains the (mainly) Maya side of the script. This allows the use of "global" variables in a contained setting. '''
@@ -326,7 +326,6 @@ class MFS_Plugin():
                 cmds.progressWindow(endProgress=1)
 
             timer_end = time.time()
-
             print(f"Maya Fluid Simulator | Simulation Complete! {timer_end-timer_start} seconds taken.")
 
 
@@ -433,6 +432,7 @@ class MFS_Plugin():
         bbox = cmds.exactWorldBoundingBox(mesh)
         min_x, min_y, min_z, max_x, max_y, max_z = bbox
 
+        # Subdivide the mesh bounding box into cells for point generation
         subdivisions = (
             int((max_x - min_x) / cell_size),
             int((max_y - min_y) / cell_size),
@@ -444,6 +444,7 @@ class MFS_Plugin():
             for j in range(subdivisions[1]):
                 for k in range(subdivisions[2]):
                     if (samples>0):
+                        # For random generation, get a point within the cell
                         for s in range(samples):
                             x = min_x + (i + random.random()) * cell_size
                             y = min_y + (j + random.random()) * cell_size
@@ -453,6 +454,7 @@ class MFS_Plugin():
                             if self.is_point_inside_mesh(point, mesh):
                                 points.append(point)
                     else:
+                        # Get the centre point of the cells
                         x = min_x + (i + 0.5) * cell_size
                         y = min_y + (j + 0.5) * cell_size
                         z = min_z + (k + 0.5) * cell_size
@@ -474,7 +476,10 @@ class MFS_Plugin():
         mesh        : the mesh to check if the point is in
         
         This only works if the mesh is enclosed, any gaps in the geometry can lead to unstable results.
+
+        There is also a slight chance that a ray could 'touch' the mesh, resulting in the algorithm thinking a particle is in the object.
         '''
+        # Random ray direction
         direction = om.MVector(random.random(), random.random(), random.random())
         
         selection_list = om.MSelectionList()
@@ -537,8 +542,10 @@ class MFS_Particle():
 
         '''
 
+        # PIC replaces the particle velocity with velocity from the grid.
         pic = current_velocity
 
+        # FLIP finds the change in velocity between the p2g grid and current grid, then adds it to the particle velocity.
         flip = self.velocity + (current_velocity - last_velocity)
         self.velocity = flipFac * flip + (1 - flipFac) * pic
 
@@ -568,13 +575,10 @@ class MFS_Grid():
         self.resolution = resolution
         self.cell_size = cell_size
 
+        # +1 on each corresponding index due to half-grid indexing
         self.velocity_u = np.zeros((self.resolution[0]+1, self.resolution[1], self.resolution[2]), dtype="float64")
         self.velocity_v = np.zeros((self.resolution[0], self.resolution[1]+1, self.resolution[2]), dtype="float64")
         self.velocity_w = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]+1), dtype="float64")
-
-        self.last_velocity_u = np.zeros((self.resolution[0]+1, self.resolution[1], self.resolution[2]), dtype="float64")
-        self.last_velocity_v = np.zeros((self.resolution[0], self.resolution[1]+1, self.resolution[2]), dtype="float64")
-        self.last_velocity_w = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]+1), dtype="float64")
 
         self.pressure = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
         self.type = np.full((self.resolution[0], self.resolution[1], self.resolution[2]), 0, dtype="int64")
@@ -590,6 +594,7 @@ class MFS_Grid():
         bbox            : The bounding box domain
 
         '''        
+        # Setup weights for normalization
         weight_u = np.zeros((self.resolution[0]+1, self.resolution[1], self.resolution[2]), dtype="float64")
 
         weight_v = np.zeros((self.resolution[0], self.resolution[1]+1, self.resolution[2]), dtype="float64")
@@ -597,10 +602,10 @@ class MFS_Grid():
         weight_w = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]+1), dtype="float64")
 
         for p in particles:
-
             # Trilinear interpolate particle u velocity to the grid (x velocity)
             x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([0.0, 0.5, 0.5]))
-        
+
+            # Each interpolated index is clamping within the bounds. In cases where indexes are out of bounds, the weights will be 0. There is no need to worry about incorrect interpolation.
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_u)
 
             i = max(i, 0)
@@ -744,6 +749,7 @@ class MFS_Grid():
                     if (weight_w[u][v][w] > 0):
                         self.velocity_w[u][v][w] /= weight_w[u][v][w]
 
+        # Store the velocity grids to be used for FLIP
         self.last_velocity_u = np.array(self.velocity_u, copy=True)
         self.last_velocity_v = np.array(self.velocity_v, copy=True)
         self.last_velocity_w = np.array(self.velocity_w, copy=True)
@@ -834,6 +840,7 @@ class MFS_Grid():
         dt                  : The simulation cfl timestep
 
         '''
+        # Apply each force component on the different velocity grids
         for u in range(self.resolution[0] + 1):
             for v in range(self.resolution[1]):
                 for w in range(self.resolution[2]):
@@ -923,8 +930,6 @@ class MFS_Grid():
                         self.velocity_w[i][j][k] += divergence[i][j][k] * self.in_bounds(i, j, k-1, self.resolution[0], self.resolution[1], self.resolution[2])/borders
                         self.velocity_w[i][j][k+1] -= divergence[i][j][k] * self.in_bounds(i, j, k+1, self.resolution[0], self.resolution[1], self.resolution[2])/borders
         
-
-
     def grid_to_particles(self, particles, bbox, flipFac, dt):
         '''grid_to_particles trilinearly interpolates the grid velocities onto the particle velocities.
 
@@ -936,13 +941,14 @@ class MFS_Grid():
         '''      
 
         for p in particles:
-            # Find the advected position
+            # Find the advected position using simple euler integration. Runge-Krutta could be implemented in the future.
             position = p.position - p.velocity * dt
 
             # Tri-linearly interpolate the grid u velocity (x velocity) to the particle
 
             x, y, z, i, j, k = self.get_grid_coords(bbox, position, np.array([0, 0.5, 0.5]))
 
+            # Each interpolated index is clamping within the bounds. In cases where indexes are out of bounds, the weights will be 0. There is no need to worry about incorrect interpolation.
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_u)
 
             total_weight = w000 + w100 + w010 + w110 + w001 + w011 + w101 + w111
@@ -976,7 +982,6 @@ class MFS_Grid():
             i = max(i, 0)
             j = max(j, 0)
             k = max(k, 0)
-
 
             last_velocity_u = (
                 self.last_velocity_u[min(i, self.resolution[0])][min(j, self.resolution[1] -1)][min(k, self.resolution[2] -1)] * w000 +
@@ -1123,6 +1128,7 @@ class MFS_Grid():
             r = pscale / 2
 
             # Handle boundary conditions
+            # All particles outside the domain are put on the edge and their velocity component set to 0
             if x - r < min_x:
                 particle.velocity[0] *= 0
                 particle.position[0] = min_x + r
@@ -1220,7 +1226,6 @@ class MFS_Grid():
 
         return x, y, z, i, j, k
     
-
     # Provided by OpenAI's ChatGPT
     # Original source: OpenAI ChatGPT model
     # URL: https://openai.com/chatgpt
