@@ -51,4 +51,6 @@ To use the tool, follow these steps:
 - **Simulate | x:** Simulate the fluid | clear the simulation.
 
 ## 3 Conclusion
+There is also an `index.html` file which contains the 2D implementation of the code in Javascript.
+
 This tool was written for L4 Technical Arts Production for Computer Animation Technical Arts at Bournemouth University. There is a very high chance that the algorithms implemented are not entirely correct, therefore be weary when re-using the code. If you wish to access (or correct) the source code, you can do so [here](https://github.com/cjhosken/MayaFluidSimulator).
