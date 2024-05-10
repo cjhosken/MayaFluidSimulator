@@ -102,7 +102,7 @@ class MFS_Plugin():
         self.relax_ctrl = cmds.floatSliderGrp(minValue=0, step=0.0001, value=0.02, field=True, label="Overrelaxation")
         self.iter_ctrl = cmds.intSliderGrp(minValue=0, value=5, field=True, label="Iterations")
 
-        self.picflip_ctrl = cmds.floatSliderGrp(minValue=0, maxValue=1.0, step=0.01, value=0.0, field=True, label="PIC/FLIP Mix")
+        self.picflip_ctrl = cmds.floatSliderGrp(minValue=0, maxValue=1.0, step=0.01, value=0.6, field=True, label="PIC/FLIP Mix")
         
         cmds.rowLayout(numberOfColumns=2)
         self.time_ctrl = cmds.intFieldGrp(numberOfFields=2, value1=0, value2=120, label="Frame Range")
