@@ -310,7 +310,7 @@ class MFS_Plugin():
                     dt = grid.calc_dt(particles, timescale, external_force)
                     grid.apply_forces(external_force, dt)
                     grid.enforce_boundaries()
-                    grid.solve_divergence(iterations, overrelaxation, stiffness, average_pressure)
+                    grid.solve_divergence(iterations, overrelaxation, stiffness, average_pressure, dt)
                     grid.grid_to_particles(particles, bbox, flipFac, dt)
                     grid.handle_collisions_and_boundary(particles, bbox, pscale)
                     cfl += dt            
@@ -593,7 +593,7 @@ class MFS_Grid():
         for p in particles:
 
             # Trilinear interpolate particle u velocity to the grid (x velocity)
-            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([0.0, -0.5, -0.5]))
+            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([0.0, 0.5, 0.5]))
         
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_u)
 
@@ -626,7 +626,7 @@ class MFS_Grid():
             weight_u[min(i+1, self.resolution[0])][min(j+1, self.resolution[1]  - 1)][min(k+1, self.resolution[2]  - 1)] += w111
 
             # Trilinear interpolate particle v velocity to the grid (y velocity)
-            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([-0.5, 0, -0.5]))
+            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([0.5, 0, 0.5]))
         
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_v)
 
@@ -660,7 +660,7 @@ class MFS_Grid():
 
 
             # Trilinear interpolate particle w velocity to the grid (z velocity)
-            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([-0.5, -0.5, 0]))
+            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([0.5, 0.5, 0]))
         
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_w)
 
@@ -693,7 +693,7 @@ class MFS_Grid():
             weight_w[min(i+1, self.resolution[0] - 1)][min(j+1, self.resolution[1] - 1)][min(k+1, self.resolution[2])] += w111
 
             # calculate particle pressure in each cell
-            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([0, 0, 0]))
+            x, y, z, i, j, k = self.get_grid_coords(bbox, p.position, np.array([0.5, 0.5, 0.5]))
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.pressure)
 
             i = max(i, 0)
@@ -868,32 +868,33 @@ class MFS_Grid():
                 if (self.velocity_w[wx][wy][self.resolution[2]] > 0):
                     self.velocity_w[wx][wy][self.resolution[2]] = 0
 
-    def solve_divergence(self, iterations, overrelaxation, stiffness, average_pressure):
-        ''' solve_divergence makes the fluid incompressible.
+    def solve_divergence(self, iterations, overrelaxation, stiffness, average_pressure, dt, tolerance=0.0001):
+        ''' solve_divergence makes the fluid incompressible.s
 
         iterations          : The number of iterations for the divergence solve
         overrelaxation      : Scalar value for the velocity difference
         stiffness           : Scalar value for the pressure difference force
-        average_pressure        : The average pressure of the fluid
+        average_pressure    : The average pressure of the fluid
+        tolerance           : tolerance value for finding convergence
         
         '''
 
         # Iterate over the number of interations specified.
-        # Iterations is set to 1 here as it gives realistic results very quickly
-        for n in range(iterations):
+        for n in range(iterations):          
+            max_divergence = 0
+
             divergence = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
 
             for i in range(self.resolution[0]):
                 for j in range(self.resolution[1]):
                     for k in range(self.resolution[2]):
-                        # Calculate the divergence.
                         divergence[i][j][k] = overrelaxation * (
                             (self.velocity_u[i+1][j][k] - self.velocity_u[i][j][k]) / (self.cell_size[0]) +
                             (self.velocity_v[i][j+1][k] - self.velocity_v[i][j][k]) / (self.cell_size[1]) +
                             (self.velocity_w[i][j][k+1] - self.velocity_w[i][j][k]) / (self.cell_size[2])
                         ) - stiffness * (self.pressure[i][j][k] - average_pressure)
 
-                        
+
             for i in range(self.resolution[0]):
                 for j in range(self.resolution[1]):
                     for k in range(self.resolution[2]):
@@ -916,7 +917,15 @@ class MFS_Grid():
 
                         self.velocity_w[i][j][k] += divergence[i][j][k] * self.in_bounds(i, j, k-1, self.resolution[0], self.resolution[1], self.resolution[2])/borders
                         self.velocity_w[i][j][k+1] -= divergence[i][j][k] * self.in_bounds(i, j, k+1, self.resolution[0], self.resolution[1], self.resolution[2])/borders
-        
+                        # Track maximum divergence for convergence check
+            
+            avg_divergence = np.linalg.norm(divergence)
+            max_divergence = max(max_divergence, avg_divergence)
+            print("Max Divergence:", max_divergence)
+            
+            if max_divergence < tolerance:
+                print("Converged at iteration:", n)
+                break
 
 
     def grid_to_particles(self, particles, bbox, flipFac, dt):
@@ -931,11 +940,11 @@ class MFS_Grid():
 
         for p in particles:
             # Find the advected position
-            advected = p.position - p.velocity * dt
+            position = p.position - p.velocity * dt
 
             # Tri-linearly interpolate the grid u velocity (x velocity) to the particle
 
-            x, y, z, i, j, k = self.get_grid_coords(bbox, advected, np.array([0, -0.5, -0.5]))
+            x, y, z, i, j, k = self.get_grid_coords(bbox, position, np.array([0, 0.5, 0.5]))
 
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_u)
 
@@ -961,7 +970,7 @@ class MFS_Grid():
 
             # Tri-linearly interpolate the pre-calculated grid u velocity (x velocity) to the particle
 
-            x, y, z, i, j, k = self.get_grid_coords(bbox, advected, np.array([0, -0.5, -0.5]))
+            x, y, z, i, j, k = self.get_grid_coords(bbox, position, np.array([0, 0.5, 0.5]))
 
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_u)
 
@@ -988,7 +997,7 @@ class MFS_Grid():
 
             # Tri-linearly interpolate the grid v velocity (y velocity) to the particle
 
-            x, y, z, i, j, k = self.get_grid_coords(bbox, advected, np.array([-0.5, 0.0, -0.5]))
+            x, y, z, i, j, k = self.get_grid_coords(bbox, position, np.array([0.5, 0.0, 0.5]))
 
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_v)
 
@@ -1015,7 +1024,7 @@ class MFS_Grid():
 
             # Tri-linearly interpolate the pre-calculated grid v velocity (y velocity) to the particle
 
-            x, y, z, i, j, k = self.get_grid_coords(bbox, advected, np.array([-0.5, 0.0, -0.5]))
+            x, y, z, i, j, k = self.get_grid_coords(bbox, position, np.array([0.5, 0.0, 0.5]))
 
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_v)
 
@@ -1042,7 +1051,7 @@ class MFS_Grid():
 
             # Tri-linearly interpolate the grid w velocity (z velocity) to the particle
 
-            x, y, z, i, j, k = self.get_grid_coords(bbox, advected, np.array([-0.5, -0.5, 0.0]))
+            x, y, z, i, j, k = self.get_grid_coords(bbox, position, np.array([0.5, 0.5, 0.0]))
 
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_w)
 
@@ -1068,7 +1077,7 @@ class MFS_Grid():
 
             # Tri-linearly interpolate the pre-calculated grid w velocity (z velocity) to the particle
 
-            x, y, z, i, j, k = self.get_grid_coords(bbox, advected, np.array([-0.5, -0.5, 0.0]))
+            x, y, z, i, j, k = self.get_grid_coords(bbox, position, np.array([0.5, 0.5, 0.0]))
 
             w000, w100, w010, w110, w001, w011, w101, w111 = self.get_trilinear_weights(x, y, z, i, j, k, self.velocity_w)
 
@@ -1099,6 +1108,7 @@ class MFS_Grid():
 
             p.integrate(current_velocity, last_velocity, flipFac, dt)
             self.insert_particle_into_hash_table(p, bbox, np.zeros(3))
+
 
     def handle_collisions_and_boundary(self, particles, bbox, pscale):
         '''handle_collsisions_and_boundary keeps the particles within the simulation domain and handles all particle to particle collisions.
@@ -1192,7 +1202,7 @@ class MFS_Grid():
             velu[i + 1][j][k] - velu[i][j][k],
             velv[i][j+1][k] - velv[i][j][k],
             velw[i][j][k+1] - velw[i][j][k]
-        ]) / self.cell_size
+        ]) / 2
     
     def get_grid_coords(self, bbox, position, offset):
         '''get_grid_coords gets the grid/cell space coordinates of a particle position.
@@ -1275,6 +1285,7 @@ class MFS_Grid():
         '''clear resets the hash table and the velocity, pressure grids.
         '''
         self.particleHashTable = {}
+
         self.velocity_u = np.zeros((self.resolution[0]+1, self.resolution[1], self.resolution[2]), dtype="float64")
         self.velocity_v = np.zeros((self.resolution[0], self.resolution[1]+1, self.resolution[2]), dtype="float64")
         self.velocity_w = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]+1), dtype="float64")
