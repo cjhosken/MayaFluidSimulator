@@ -97,8 +97,8 @@ class MFS_Plugin():
         self.force_ctrl = cmds.floatFieldGrp(numberOfFields=3, label='Force', extraLabel='cm', value1=0, value2=-9.8, value3=0 )
         self.vel_ctrl = cmds.floatFieldGrp( numberOfFields=3, label='Initial Velocity', extraLabel='cm', value1=0, value2=0, value3=0 )
 
-        self.stiff_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.05, field=True, label="Pressure")
-        self.relax_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.019, field=True, label="Overrelaxation")
+        self.stiff_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.1, field=True, label="Pressure")
+        self.relax_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.0019, field=True, label="Overrelaxation")
         self.iter_ctrl = cmds.intSliderGrp(minValue=0, value=5, field=True, label="Iterations")
 
         self.picflip_ctrl = cmds.floatSliderGrp(minValue=0, maxValue=1.0, step=0.01, value=0.0, field=True, label="PIC/FLIP Mix")
