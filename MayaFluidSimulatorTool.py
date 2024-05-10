@@ -13,6 +13,7 @@ from maya.api import OpenMaya as om
 import os
 import random
 import re
+import time
 
 ''' Maya Fluid Simulator uses numpy. Users will need to manually install numpy using the commands below.
 
@@ -97,8 +98,8 @@ class MFS_Plugin():
         self.force_ctrl = cmds.floatFieldGrp(numberOfFields=3, label='Force', extraLabel='cm', value1=0, value2=-9.8, value3=0 )
         self.vel_ctrl = cmds.floatFieldGrp( numberOfFields=3, label='Initial Velocity', extraLabel='cm', value1=0, value2=0, value3=0 )
 
-        self.stiff_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.1, field=True, label="Pressure")
-        self.relax_ctrl = cmds.floatSliderGrp(minValue=0, step=0.001, value=0.0019, field=True, label="Overrelaxation")
+        self.stiff_ctrl = cmds.floatSliderGrp(minValue=0, step=0.0001, value=1.0, field=True, label="Pressure")
+        self.relax_ctrl = cmds.floatSliderGrp(minValue=0, step=0.0001, value=0.02, field=True, label="Overrelaxation")
         self.iter_ctrl = cmds.intSliderGrp(minValue=0, value=5, field=True, label="Iterations")
 
         self.picflip_ctrl = cmds.floatSliderGrp(minValue=0, maxValue=1.0, step=0.01, value=0.0, field=True, label="PIC/FLIP Mix")
@@ -267,6 +268,7 @@ class MFS_Plugin():
             solved = False
             cancelled = False
 
+            timer_start = time.time()
             # This is the start of the simulator. The method is a python implementation of:
             #
             # 1. keyframe frame: copy the particle positions in the simulation onto the maya particle objects.
@@ -322,6 +324,10 @@ class MFS_Plugin():
             else:
                 cmds.currentTime(frame_range[0], edit=True)
                 cmds.progressWindow(endProgress=1)
+
+            timer_end = time.time()
+
+            print(f"Maya Fluid Simulator | Simulation Complete! {timer_end-timer_start} seconds taken.")
 
 
     def keyframe(self, source, particles, t):
@@ -881,18 +887,17 @@ class MFS_Grid():
 
         # Iterate over the number of interations specified.
         for n in range(iterations):          
-            max_divergence = 0
-
             divergence = np.zeros((self.resolution[0], self.resolution[1], self.resolution[2]), dtype="float64")
 
             for i in range(self.resolution[0]):
                 for j in range(self.resolution[1]):
                     for k in range(self.resolution[2]):
-                        divergence[i][j][k] = overrelaxation * (
+                        # Dividing by 10 due to the scene scale. Ideally, this should be removed in future implementations.
+                        divergence[i][j][k] = overrelaxation/10 * (
                             (self.velocity_u[i+1][j][k] - self.velocity_u[i][j][k]) / (self.cell_size[0]) +
                             (self.velocity_v[i][j+1][k] - self.velocity_v[i][j][k]) / (self.cell_size[1]) +
                             (self.velocity_w[i][j][k+1] - self.velocity_w[i][j][k]) / (self.cell_size[2])
-                        ) - stiffness * (self.pressure[i][j][k] - average_pressure)
+                        ) - stiffness/10 * (self.pressure[i][j][k] - average_pressure)
 
 
             for i in range(self.resolution[0]):
@@ -917,15 +922,7 @@ class MFS_Grid():
 
                         self.velocity_w[i][j][k] += divergence[i][j][k] * self.in_bounds(i, j, k-1, self.resolution[0], self.resolution[1], self.resolution[2])/borders
                         self.velocity_w[i][j][k+1] -= divergence[i][j][k] * self.in_bounds(i, j, k+1, self.resolution[0], self.resolution[1], self.resolution[2])/borders
-                        # Track maximum divergence for convergence check
-            
-            avg_divergence = np.linalg.norm(divergence)
-            max_divergence = max(max_divergence, avg_divergence)
-            print("Max Divergence:", max_divergence)
-            
-            if max_divergence < tolerance:
-                print("Converged at iteration:", n)
-                break
+        
 
 
     def grid_to_particles(self, particles, bbox, flipFac, dt):
