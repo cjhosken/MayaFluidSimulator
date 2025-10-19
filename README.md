@@ -1,56 +1,93 @@
+# 🌊 Maya Fluid Simulator
 
-# Maya Fluid Simulator User Manual
+[![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=fff)](#)
 
-## 1. Installation
+[![Maya](https://img.shields.io/badge/Autodesk_Maya-%233A95E3.svg?&logo=autodesk&logoColor=white)](#)
 
-Before running the tool, you must install Numpy into your Maya distribution. Numpy is recommended for its significant speed advantages over regular Python lists (Verma, 2020). Follow the instructions below to install Numpy:
+**Maya Fluid Simulator (MFS)** is a Python-based implementation of PIC/FLIP in **Autodesk Maya**.
 
-### Windows:
+📘 Learn more about the theory and implementation of Maya Fluid Simulator [here](https://cjhosken.github.io/blog/mfs).
+
+## 🧩 1. Installation
+
+Before running the tool, you must install **NumPy** into your Maya distribution.
+NumPy provides significant performance advantages over standard Python lists (Verma, 2020).
+
+Follow the instructions below to install NumPy:
+
+### 🪟 Windows
+
 ```bash
 "C:\Program Files\Autodesk\Maya2023\bin\mayapy.exe" -m pip install --user numpy
 ```
 
-### Linux:
+### 🐧 Linux
+
 ```bash
 /usr/autodesk/maya2023/bin/mayapy -m pip install --user numpy
 ```
 
-### Mac:
+### 🍎 Mac
+
 ```bash
-/Applications/Autodesk/maya2023/Maya.app/Contents/bin/mayapy -m pip install –-user numpy
+/Applications/Autodesk/maya2023/Maya.app/Contents/bin/mayapy -m pip install --user numpy
 ```
 
-*Note: Ensure you adjust the paths in the installation commands to match your Maya version.*
+> 💡 **Note:** Make sure to adjust the file paths to match your specific Maya version and installation directory.
 
-Once Numpy is installed, launch Maya and load the script. A panel titled “Maya Fluid Simulator” should appear on the Maya top bar.
+Once NumPy is installed, launch Maya and load the script.
+A new menu titled **“Maya Fluid Simulator”** should appear on the Maya top bar.
 
-## 2. Usage
+---
 
-To use the tool, follow these steps:
+## 🧠 2. Usage
 
-1. Open the user interface by selecting "Maya Fluid Simulator" -> "Open Maya Fluid Simulator".
-2. You'll see several options and buttons appear:
+Follow the steps below to begin using the simulator:
 
-### Initialize
-- **Particle Size (0.1):** Diameter of particles.
-- **Cell Size (0.25):** Size of cells for hashmap searches and velocity transfer.
-- **Random Sampling (0):** Number of particles to randomly sample inside the source object cells.
-- **Domain Size (5, 5, 5):** Size of the simulation domain.
-- **Keep Domain (True):** Keep the domain when re-initializing points.
-- **Initialize | x:** Create particles in the source object and create a domain object | delete all the generated artifacts.
+1. Open the user interface:
+   **Maya Fluid Simulator → Open Maya Fluid Simulator**
+2. A new control panel will appear, containing several options and settings.
 
-### Simulate
-- **Force (0, -9.8, 0):** Global force acting on the particles.
-- **Initial Velocity (0, 0, 0):** Initial particle velocity.
-- **Pressure (0.1):** Pressure divergence.
-- **Overrelaxation (0.02):** Velocity divergence.
-- **Iterations (5):** Number of iterations for solving the divergence.
-- **PIC / FLIP Mix (0.6):** Blending between PIC (smooth) / FLIP (splashy).
-- **Frame Range (0, 120):** Start and end frames for the simulation.
-- **Time Scale (0.1):** Speed of the simulation.
-- **Simulate | x:** Simulate the fluid | clear the simulation.
+---
 
-## 3 Conclusion
-There is also an `index.html` file which contains the 2D implementation of the code in Javascript.
+### ⚙️ Initialize
 
-This tool was written for L4 Technical Arts Production for Computer Animation Technical Arts at Bournemouth University. There is a very high chance that the algorithms implemented are not entirely correct, therefore be weary when re-using the code. If you wish to access (or correct) the source code, you can do so [here](https://github.com/cjhosken/MayaFluidSimulator).
+| Parameter                 | Description                                                               |
+| ------------------------- | ------------------------------------------------------------------------- |
+| **Particle Size (0.1)**   | Diameter of individual particles.                                         |
+| **Cell Size (0.25)**      | Size of grid cells used for hashmap searches and velocity transfer.       |
+| **Random Sampling (0)**   | Number of particles randomly sampled within source object cells.          |
+| **Domain Size (5, 5, 5)** | Defines the overall size of the simulation domain.                        |
+| **Keep Domain (True)**    | Retains the domain object when re-initializing points.                    |
+| **[Initialize]**        | *Create particles and domain objects* | *Delete all generated artifacts.* |
+
+---
+
+### 💧 Simulate
+
+| Parameter                      | Description                                                     |
+| ------------------------------ | --------------------------------------------------------------- |
+| **Force (0, -9.8, 0)**         | Global force applied to all particles (e.g., gravity).          |
+| **Initial Velocity (0, 0, 0)** | Initial velocity vector of particles.                           |
+| **Pressure (0.1)**             | Controls the pressure divergence within the fluid.              |
+| **Overrelaxation (0.02)**      | Controls the velocity divergence for stability.                 |
+| **Iterations (5)**             | Number of solver iterations per frame.                          |
+| **PIC / FLIP Mix (0.6)**       | Blending ratio between PIC (smooth) and FLIP (splashy) methods. |
+| **Frame Range (0, 120)**       | Start and end frame range for the simulation.                   |
+| **Time Scale (0.1)**           | Adjusts the speed of the simulation.                            |
+| **[Simulate]**               | *Run the simulation* | *Clear the simulation results.*          |
+
+---
+
+## 🧾 3. Additional Information
+
+An additional `index.html` file is included, containing a **2D JavaScript implementation** of the fluid simulation.
+
+This tool was developed for by [Christopher Hosken](https://cjhosken.github.io) for **L4 Technical Arts Production**
+as part of the **Computer Animation Technical Arts** course at *Bournemouth University*.
+
+> ⚠️ **Disclaimer:**
+> The implemented algorithms may not be fully accurate. Use caution when reusing or extending this code.
+
+To access or contribute to the source code, visit the GitHub repository:
+🔗 [github.com/cjhosken/MayaFluidSimulator](https://github.com/cjhosken/MayaFluidSimulator)
