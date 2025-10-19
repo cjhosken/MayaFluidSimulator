@@ -1,8 +1,13 @@
-# 🌊 Maya Fluid Simulator
+<h1 align="center">
+ 🌊 Maya Fluid Simulator
+</h1>
+
+<div align="center">
 
 [![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=fff)](#)
-
 [![Maya](https://img.shields.io/badge/Autodesk_Maya-%233A95E3.svg?&logo=autodesk&logoColor=white)](#)
+
+</div>
 
 **Maya Fluid Simulator (MFS)** is a Python-based implementation of PIC/FLIP in **Autodesk Maya**.
 
